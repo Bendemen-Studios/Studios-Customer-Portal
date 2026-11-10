@@ -32,7 +32,7 @@ const woo = require("./src/woocommerce");
 const { sendAutomatedOrderEmail } = require("./src/order-mail");
 
 const app = express();
-const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 3000);
+const PORT = Number(process.env.SERVER_PORT || process.env.PORT || 3000);
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -214,4 +214,4 @@ app.get("/admin/customers/:id",requireAuth,requireAdmin,(req,res)=>{
 
 app.get("/health",(_req,res)=>res.json({ok:true}));
 app.use((err,req,res,next)=>{console.error(err);res.status(500).send("Er is iets misgegaan.");});
-app.listen(PORT,()=>console.log(`Bendemen Customer Portal draait op poort ${PORT}`));
+app.listen(PORT, "0.0.0.0", ()=>console.log(`Bendemen Customer Portal draait op poort ${PORT}`));
