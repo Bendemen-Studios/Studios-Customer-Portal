@@ -1,7 +1,24 @@
 const path = require("path");
-const dotenvResult = require("dotenv").config({ path: path.join(__dirname, ".env") });
-if (dotenvResult.error && process.env.NODE_ENV !== "production") {
-  console.warn("Geen .env-bestand gevonden; omgevingsvariabelen worden gebruikt.");
+const fs = require("fs");
+const crypto = require("crypto");
+const envPath = path.join(__dirname, ".env");
+require("dotenv").config({ path: envPath });
+
+// Genereer en bewaar automatisch een sessiesleutel als .env ontbreekt
+// of SESSION_SECRET niet minimaal 32 tekens bevat.
+if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
+  const generatedSecret = crypto.randomBytes(48).toString("hex");
+  let envText = "";
+  try { envText = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : ""; } catch (_) {}
+  const secretLine = "SESSION_SECRET=" + generatedSecret;
+  if (/^SESSION_SECRET=.*$/m.test(envText)) {
+    envText = envText.replace(/^SESSION_SECRET=.*$/m, secretLine);
+  } else {
+    envText = envText.replace(/\s*$/, "") + (envText.trim() ? "\n" : "") + secretLine + "\n";
+  }
+  fs.writeFileSync(envPath, envText, { mode: 0o600 });
+  process.env.SESSION_SECRET = generatedSecret;
+  console.warn("SESSION_SECRET ontbrak of was te kort; automatisch een veilige sleutel aangemaakt in .env.");
 }
 const express = require("express");
 const session = require("express-session");
@@ -17,10 +34,6 @@ const { sendAutomatedOrderEmail } = require("./src/order-mail");
 
 const app = express();
 const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 3000);
-if (process.env.NODE_ENV === "production" && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32)) {
-  console.error("SESSION_SECRET moet in productie minimaal 32 tekens bevatten.");
-  process.exit(1);
-}
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
