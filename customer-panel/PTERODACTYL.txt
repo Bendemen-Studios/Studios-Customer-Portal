@@ -1,0 +1,9 @@
+BENDEMEN CUSTOMER PANEL - PTERODACTYL
+- Node.js 20 or hoger.
+- Install command: npm install
+- Startup command: npm start
+- Zorg voor persistente, schrijfbare ./data opslag.
+- Stel de variabelen uit .env.example in bij Startup/Environment.
+- SMTP gebruikt poort 465 met SSL/TLS: SMTP_PORT=465 en SMTP_SECURE=true.
+- PANEL_PUBLIC_URL is de volledige publieke HTTPS-basis-URL.
+- Behoud .env en data/bendemen.sqlite bij updates.
