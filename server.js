@@ -1,4 +1,8 @@
-require("dotenv").config();
+const path = require("path");
+const dotenvResult = require("dotenv").config({ path: path.join(__dirname, ".env") });
+if (dotenvResult.error && process.env.NODE_ENV !== "production") {
+  console.warn("Geen .env-bestand gevonden; omgevingsvariabelen worden gebruikt.");
+}
 const express = require("express");
 const session = require("express-session");
 const helmet = require("helmet");
@@ -6,7 +10,6 @@ const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
-const path = require("path");
 const db = require("./src/db");
 const { requireAuth, requireAdmin } = require("./src/auth");
 const woo = require("./src/woocommerce");
