@@ -25,7 +25,6 @@ const session = require("express-session");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcryptjs");
-const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const db = require("./src/db");
 const { requireAuth, requireAdmin } = require("./src/auth");
