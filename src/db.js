@@ -39,7 +39,7 @@ const userCols = db.prepare("PRAGMA table_info(users)").all().map(x => x.name);
 if (!userCols.includes("active")) db.exec("ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
 
 const insertAdmin = db.prepare(`INSERT INTO users (name,email,password_hash,role,active)
- VALUES ('Bendemen Admin','info@bendemen.nl','magic-link-only','admin',1)
+ VALUES ('Bendemen Admin','info@bendemen.nl','password-not-set','admin',1)
  ON CONFLICT(email) DO UPDATE SET role='admin',active=1`);
 insertAdmin.run();
 
