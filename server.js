@@ -50,7 +50,7 @@ const money = euro;
 function page(req, title, body) {
   const user = req.session.user;
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · Bendemen Studios</title><link rel="stylesheet" href="/style.css"></head><body>
-  <header class="top"><a class="brand" href="/"><span class="mark">B</span><span>BENDEMEN <small>STUDIOS</small></span></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/costs">Maandkosten</a><a href="/subscriptions">Diensten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
+  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/costs">Maandkosten</a><a href="/subscriptions">Diensten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
   <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Customer portal</span></footer></body></html>`;
 }
 function moneyInput(value) { return Math.round(Number(String(value).replace(",", ".")) * 100); }
