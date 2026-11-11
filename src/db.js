@@ -1,7 +1,6 @@
 const Database = require("better-sqlite3");
 const fs = require("fs");
 const path = require("path");
-const bcrypt = require("bcryptjs");
 
 const dbPath = process.env.DB_PATH || "./data/bendemen.sqlite";
 fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
@@ -18,15 +17,6 @@ CREATE TABLE IF NOT EXISTS users (
  active INTEGER NOT NULL DEFAULT 1,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE IF NOT EXISTS magic_login_tokens (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
- token_hash TEXT NOT NULL UNIQUE,
- expires_at TEXT NOT NULL,
- used_at TEXT,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_magic_tokens_user ON magic_login_tokens(user_id, expires_at);
 CREATE TABLE IF NOT EXISTS order_cache (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -44,6 +34,7 @@ CREATE TABLE IF NOT EXISTS cancellations (
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `);
+db.exec("DROP TABLE IF EXISTS magic_login_tokens");
 const userCols = db.prepare("PRAGMA table_info(users)").all().map(x => x.name);
 if (!userCols.includes("active")) db.exec("ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
 
