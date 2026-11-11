@@ -25,7 +25,6 @@ const session = require("express-session");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcryptjs");
-const nodemailer = require("nodemailer");
 const db = require("./src/db");
 const { requireAuth, requireAdmin } = require("./src/auth");
 const woo = require("./src/woocommerce");
@@ -45,7 +44,6 @@ app.use(session({
 }));
 app.use(express.static(path.join(__dirname, "public")));
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
-const ADMIN_EMAIL = "info@bendemen.nl";
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const euro = cents => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format((cents || 0) / 100);
 const money = euro;
@@ -99,49 +97,15 @@ function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrder
 
 app.get("/login",(req,res)=>{
   if(req.session.user)return res.redirect("/");
-  const notice=req.query.sent?'<div class="success">Als dit een actief account is, ontvang je binnen enkele minuten een e-mail met een inloglink.</div>':"";
-  const error=req.query.error?'<div class="alert">Inloggen is niet gelukt. Controleer je gegevens of vraag een nieuwe magic link aan.</div>':"";
-  res.send(page(req,"Inloggen",`<section class="auth-card"><div class="eyebrow">BENDEMEN STUDIOS</div><h1>Welkom terug.</h1><p class="sub">Beheer logt veilig in via een eenmalige magic link. Klanten gebruiken hun e-mailadres en wachtwoord.</p>${req.query.disabled?'<div class="alert">Dit account is uitgeschakeld. Neem contact op met Bendemen Studios.</div>':""}${notice}${error}<form method="post" action="/login" class="stack"><label>E-mailadres<input name="email" type="email" autocomplete="username" required></label><label class="password-field">Wachtwoord (alleen klanten)<input name="password" type="password" autocomplete="current-password"></label><button class="primary">Inloggen / magic link versturen <span>→</span></button></form><p class="hint">Admin: vul info@bendemen.nl in; je ontvangt een eenmalige inloglink per e-mail.</p></section>`));
+  const error=req.query.error?'<div class="alert">Inloggen is niet gelukt. Controleer je e-mailadres en wachtwoord.</div>':"";
+  res.send(page(req,"Inloggen",`<section class="auth-card"><div class="eyebrow">BENDEMEN STUDIOS</div><h1>Welkom terug.</h1><p class="sub">Log in met je e-mailadres en wachtwoord om je account te beheren.</p>${req.query.disabled?'<div class="alert">Dit account is uitgeschakeld. Neem contact op met Bendemen Studios.</div>':""}${error}<form method="post" action="/login" class="stack"><label>E-mailadres<input name="email" type="email" autocomplete="username" required></label><label>Wachtwoord<input name="password" type="password" autocomplete="current-password" required></label><button class="primary">Inloggen <span>→</span></button></form></section>`));
 });
 app.post("/login",loginLimiter,async(req,res)=>{
   const email=String(req.body.email||"").trim().toLowerCase();
-  if(email===ADMIN_EMAIL){
-    const user=db.prepare("SELECT id,email,active,role FROM users WHERE email=? COLLATE NOCASE").get(ADMIN_EMAIL);
-    if(user&&user.active===1&&user.role==="admin"){
-      try{
-        if(!process.env.SMTP_HOST||!process.env.SMTP_USER||!process.env.SMTP_PASS||!process.env.SMTP_FROM||!process.env.PANEL_PUBLIC_URL) throw new Error("SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM en PANEL_PUBLIC_URL zijn vereist");
-        const rawToken=crypto.randomBytes(32).toString("hex");
-        const tokenHash=crypto.createHash("sha256").update(rawToken).digest("hex");
-        const expiresAt=new Date(Date.now()+15*60*1000).toISOString();
-        db.prepare("DELETE FROM magic_login_tokens WHERE user_id=? OR expires_at < ? OR used_at IS NOT NULL").run(user.id,new Date().toISOString());
-        db.prepare("INSERT INTO magic_login_tokens (user_id,token_hash,expires_at) VALUES (?,?,?)").run(user.id,tokenHash,expiresAt);
-        const base=process.env.PANEL_PUBLIC_URL.replace(/\/+$/,"");
-        const link=`${base}/admin/magic-login?token=${rawToken}`;
-        const transporter=nodemailer.createTransport({host:process.env.SMTP_HOST,port:Number(process.env.SMTP_PORT||465),secure:String(process.env.SMTP_SECURE||"true")==="true",auth:{user:process.env.SMTP_USER,pass:process.env.SMTP_PASS}});
-        await transporter.sendMail({from:process.env.SMTP_FROM,to:ADMIN_EMAIL,subject:"Je beveiligde Bendemen Studios inloglink",text:`Gebruik deze eenmalige inloglink (15 minuten geldig): ${link}`,html:`<p>Gebruik deze eenmalige inloglink. De link is 15 minuten geldig.</p><p><a href="${link}">Veilig inloggen</a></p>`});
-      }catch(err){console.error("Versturen admin magic link mislukt:",err.message);}
-    }
-    return res.redirect("/login?sent=1");
-  }
+  const password=String(req.body.password||"");
   const user=db.prepare("SELECT * FROM users WHERE email=? COLLATE NOCASE").get(email);
-  if(!user||user.active!==1||user.role!=="customer"||!(await bcrypt.compare(String(req.body.password||""),user.password_hash)))return res.redirect("/login?error=1");
-  req.session.regenerate(err=>{if(err)return res.status(500).send("Sessie kon niet worden gestart.");req.session.user={id:user.id,name:user.name,email:user.email,role:user.role};res.redirect("/");});
-});
-app.get("/admin/magic-login",loginLimiter,(req,res)=>{
-  const token=String(req.query.token||"");if(!/^[a-f0-9]{64}$/.test(token))return res.redirect("/login?error=1");
-  const tokenHash=crypto.createHash("sha256").update(token).digest("hex");
-  const record=db.prepare(`SELECT t.expires_at,t.used_at,u.active,u.role,u.email FROM magic_login_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?`).get(tokenHash);
-  if(!record||record.used_at||Date.parse(record.expires_at)<=Date.now()||record.active!==1||record.role!=="admin"||record.email.toLowerCase()!==ADMIN_EMAIL)return res.redirect("/login?error=1");
-  res.send(page(req,"Admin inloggen",`<section class="auth-card"><div class="eyebrow">BENDEMEN STUDIOS · BEHEER</div><h1>Bevestig je login.</h1><p class="sub">Deze beveiligde inloglink is geldig tot 15 minuten na aanvraag en kan één keer worden gebruikt.</p><form method="post" action="/admin/magic-login" class="stack"><input type="hidden" name="token" value="${esc(token)}"><button class="primary">Veilig inloggen <span>→</span></button></form></section>`));
-});
-app.post("/admin/magic-login",loginLimiter,(req,res)=>{
-  const token=String(req.body.token||"");if(!/^[a-f0-9]{64}$/.test(token))return res.redirect("/login?error=1");
-  const tokenHash=crypto.createHash("sha256").update(token).digest("hex");
-  const record=db.prepare(`SELECT t.id token_id,t.expires_at,t.used_at,u.id,u.name,u.email,u.role,u.active FROM magic_login_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?`).get(tokenHash);
-  if(!record||record.used_at||Date.parse(record.expires_at)<=Date.now()||record.active!==1||record.role!=="admin"||record.email.toLowerCase()!==ADMIN_EMAIL)return res.redirect("/login?error=1");
-  const consumed=db.prepare("UPDATE magic_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=? AND used_at IS NULL AND expires_at > ?").run(record.token_id,new Date().toISOString());
-  if(!consumed.changes)return res.redirect("/login?error=1");
-  req.session.regenerate(err=>{if(err)return res.status(500).send("Sessie kon niet worden gestart.");req.session.user={id:record.id,name:record.name,email:record.email,role:record.role};res.redirect("/admin");});
+  if(!user||user.active!==1||!["admin","customer"].includes(user.role)||!(await bcrypt.compare(password,user.password_hash)))return res.redirect("/login?error=1");
+  req.session.regenerate(err=>{if(err)return res.status(500).send("Sessie kon niet worden gestart.");req.session.user={id:user.id,name:user.name,email:user.email,role:user.role};res.redirect(user.role==="admin"?"/admin":"/");});
 });
 app.post("/logout",requireAuth,(req,res)=>req.session.destroy(()=>res.redirect("/login")));
 
