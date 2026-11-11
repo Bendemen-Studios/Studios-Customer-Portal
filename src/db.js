@@ -1,4 +1,5 @@
 const Database = require("better-sqlite3");
+const bcrypt = require("bcryptjs");
 const fs = require("fs");
 const path = require("path");
 
@@ -42,5 +43,16 @@ const insertAdmin = db.prepare(`INSERT INTO users (name,email,password_hash,role
  VALUES ('Bendemen Admin','info@bendemen.nl','password-not-set','admin',1)
  ON CONFLICT(email) DO UPDATE SET role='admin',active=1`);
 insertAdmin.run();
+
+// Stel het adminwachtwoord rechtstreeks in via ADMIN_PASSWORD in .env.
+// Het wachtwoord wordt alleen als bcrypt-hash in SQLite opgeslagen.
+if (process.env.ADMIN_PASSWORD) {
+  if (process.env.ADMIN_PASSWORD.length < 12) {
+    throw new Error("ADMIN_PASSWORD moet minimaal 12 tekens bevatten.");
+  }
+  const adminHash = bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12);
+  db.prepare("UPDATE users SET password_hash=? WHERE email=? COLLATE NOCASE AND role='admin'")
+    .run(adminHash, "info@bendemen.nl");
+}
 
 module.exports = db;
