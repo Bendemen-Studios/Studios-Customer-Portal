@@ -122,6 +122,13 @@ async function syncDeletedWooOrders(){
  orderCleanupRunning=true;
  const stats={busy:false,checked:0,updated:0,removed:0,failed:0};
  try{
+  // Lokale orders zonder WooCommerce-koppeling kunnen niet via WooCommerce bestaan.
+  // Verwijder ze tijdens een expliciete handmatige refresh zodat SUPPLY-nummers vrijkomen.
+  const unlinked=db.prepare("SELECT id FROM orders WHERE wc_order_id IS NULL OR wc_order_id='' ORDER BY id").all();
+  for(const row of unlinked){
+   db.prepare("DELETE FROM orders WHERE id=? AND (wc_order_id IS NULL OR wc_order_id='')").run(row.id);
+   stats.removed++;
+  }
   const linked=db.prepare("SELECT id,wc_order_id FROM orders WHERE wc_order_id IS NOT NULL AND wc_order_id != '' ORDER BY id").all();
   for(const row of linked){
    stats.checked++;
