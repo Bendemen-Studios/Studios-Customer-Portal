@@ -225,7 +225,6 @@ app.post("/account/password",requireAuth,async(req,res)=>{
  if(!user||!(await bcrypt.compare(current,user.password_hash)))return res.status(400).send("Het huidige wachtwoord is onjuist.");
  if(next.length<6||next.length>200||next!==confirm)return res.status(400).send("Het nieuwe wachtwoord moet minimaal 6 tekens bevatten en beide velden moeten overeenkomen.");
  try{
-  if(user.role==="customer"&&user.wc_customer_id)await woo.setCustomerPassword(user.wc_customer_id,next);
   const hash=await bcrypt.hash(next,12);
   db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(hash,user.id);
   res.redirect("/account/password?updated=1");
@@ -305,7 +304,6 @@ app.post("/admin/customers/link",requireAuth,requireAdmin,async(req,res)=>{
  try{
   const c=await woo.getCustomer(wcId),email=String(c.email||"").trim().toLowerCase(),name=[c.first_name,c.last_name].filter(Boolean).join(" ")||email;
   if(!email||email.indexOf("@")<1)return res.status(400).send("Deze WooCommerce-klant heeft geen geldig e-mailadres.");
-  await woo.setCustomerPassword(wcId,password);
   const hash=await bcrypt.hash(password,12),existing=db.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE").get(email);
   if(existing)db.prepare("UPDATE users SET name=?,password_hash=?,role='customer',active=1,wc_customer_id=? WHERE id=?").run(name,hash,wcId,existing.id);
   else db.prepare("INSERT INTO users (name,email,password_hash,role,active,wc_customer_id) VALUES (?,?,?,'customer',1,?)").run(name,email,hash,wcId);
