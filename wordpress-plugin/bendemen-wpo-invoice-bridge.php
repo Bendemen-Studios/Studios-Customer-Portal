@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) exit;
  * are affected; all other shop orders keep the normal WP Overnight rules.
  */
 add_filter('wpo_wcpdf_document_is_allowed', function ($allowed, $document) {
-  if (!is_object($document) || !isset($document->order) || !is_object($document->order)) {
+  if (!is_object($document) || !is_object($document->order ?? null)) {
     return $allowed;
   }
   if (method_exists($document, 'get_type') && $document->get_type() === 'invoice') {
