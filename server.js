@@ -36,7 +36,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.urlencoded({ extended: false, limit: "32kb" }));
-app.use(express.json({ limit: "32kb" }));
+app.use(express.json({ limit: "2mb", verify: (req,res,buf) => { req.rawBody = Buffer.from(buf); } }));
 class SQLiteSessionStore extends session.Store {
  get(sid,callback){try{const row=db.prepare("SELECT data FROM sessions WHERE sid=? AND expires_at>?").get(sid,Date.now());callback(null,row?JSON.parse(row.data):null);}catch(err){callback(err);}}
  set(sid,sess,callback){try{const expires=sess.cookie&&sess.cookie.expires?new Date(sess.cookie.expires).getTime():Date.now()+86400000;db.prepare("INSERT INTO sessions(sid,data,expires_at) VALUES(?,?,?) ON CONFLICT(sid) DO UPDATE SET data=excluded.data,expires_at=excluded.expires_at").run(sid,JSON.stringify(sess),expires);callback&&callback(null);}catch(err){callback&&callback(err);}}
@@ -110,6 +110,50 @@ function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrder
   return tx();
 }
 
+
+
+ 
+// Inkomende WooCommerce order.created webhook
+app.post("/webhooks/woocommerce", (req,res) => {
+  const secret = process.env.WC_WEBHOOK_SECRET;
+  const signature = req.get("x-wc-webhook-signature") || "";
+  if (!secret) return res.status(503).json({ error: "WC_WEBHOOK_SECRET is niet ingesteld." });
+  const expected = crypto.createHmac("sha256", secret).update(req.rawBody || Buffer.from("")).digest("base64");
+  const a = Buffer.from(signature), b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a,b)) return res.status(401).json({ error: "Ongeldige WooCommerce webhook-handtekening." });
+  const order = req.body;
+  if (!order || !order.id) return res.status(400).json({ error: "Ongeldige WooCommerce order-payload." });
+  const topic = req.get("x-wc-webhook-topic") || "";
+  if (topic && topic !== "order.created") return res.status(200).json({ received: true, ignored: true, topic });
+  const wcOrderId = String(order.id);
+  const existing = db.prepare("SELECT id FROM orders WHERE wc_order_id=?").get(wcOrderId);
+  if (existing) return res.status(200).json({ received: true, duplicate: true, localOrderId: existing.id });
+  const email = String(order.billing?.email || "").trim().toLowerCase();
+  const wcCustomerId = Number(order.customer_id || 0);
+  const linked = wcCustomerId ? db.prepare("SELECT id FROM users WHERE wc_customer_id=? AND active=1").get(String(wcCustomerId)) : null;
+  const customer = linked || (email ? db.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE AND active=1").get(email) : null);
+  if (!customer) {
+    console.warn("WooCommerce webhook voor niet-gekoppelde klant:", email || "(geen e-mailadres)");
+    return res.status(200).json({ received: true, ignored: true, reason: "customer_not_linked" });
+  }
+  const lineItems = Array.isArray(order.line_items) ? order.line_items : [];
+  if (!lineItems.length) return res.status(200).json({ received: true, ignored: true, reason: "empty_order" });
+  const totalCents = Math.round(Number(order.total || 0) * 100);
+  const tx = db.transaction(() => {
+    const result = db.prepare("INSERT INTO orders (user_id,status,total_cents,wc_order_id,wc_status,currency,notes) VALUES (?,?,?,?,?,?,?)")
+      .run(customer.id, "Nieuw", totalCents, wcOrderId, String(order.status || "pending"), String(order.currency || "EUR"), "Ontvangen via WooCommerce");
+    const insert = db.prepare("INSERT INTO order_items (order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)");
+    for (const item of lineItems) {
+      const quantity = Math.max(1, Math.trunc(Number(item.quantity) || 1));
+      const unitPriceCents = Math.round((Number(item.total || 0) / quantity) * 100);
+      insert.run(result.lastInsertRowid, item.product_id ? String(item.product_id) : null, String(item.name || "WooCommerce product"), quantity, unitPriceCents);
+    }
+    return Number(result.lastInsertRowid);
+  });
+  const localOrderId = tx();
+  console.log(`WooCommerce order ${wcOrderId} ontvangen als lokale bestelling ${localOrderId}`);
+  return res.status(200).json({ received: true, localOrderId });
+});
 
 app.get("/register",(req,res)=>res.redirect("/login"));
 app.post("/register",(req,res)=>res.status(403).send("Accountregistratie is alleen mogelijk via beheer."));
