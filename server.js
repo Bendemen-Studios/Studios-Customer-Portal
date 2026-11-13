@@ -83,7 +83,7 @@ function getOrders(userId, limit = 100) {
   return db.prepare(`SELECT o.*, 'BDS-' || printf('%06d',o.id) order_number,
     strftime('%d-%m-%Y',o.created_at) date,
     (SELECT group_concat(oi.quantity || '× ' || oi.product_name, ', ') FROM order_items oi WHERE oi.order_id=o.id) summary
-    FROM orders o WHERE o.user_id=? AND o.show_in_history=1 ORDER BY o.id DESC LIMIT ?`).all(userId, limit);
+    FROM orders o WHERE o.user_id=? AND (o.show_in_history=1 OR o.recurring_order_id IS NOT NULL) ORDER BY o.id DESC LIMIT ?`).all(userId, limit);
 }
 async function syncWooOrder(orderId) {
   try {
