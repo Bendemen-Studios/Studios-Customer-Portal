@@ -301,7 +301,7 @@ app.get("/admin/customers/search",requireAuth,requireAdmin,async(req,res)=>{
 });
 app.post("/admin/customers/link",requireAuth,requireAdmin,async(req,res)=>{
  const wcId=String(req.body.wc_customer_id||"").trim(),password=String(req.body.password||"");
- if(!/^\\d+$/.test(wcId)||password.length<6||password.length>200)return res.status(400).send("Ongeldig account of wachtwoord (minimaal 6 tekens).");
+ if(!/^\d+$/.test(wcId)||password.length<6||password.length>200)return res.status(400).send("Ongeldig account of wachtwoord (minimaal 6 tekens).");
  try{
   const c=await woo.getCustomer(wcId),email=String(c.email||"").trim().toLowerCase(),name=[c.first_name,c.last_name].filter(Boolean).join(" ")||email;
   if(!email||email.indexOf("@")<1)return res.status(400).send("Deze WooCommerce-klant heeft geen geldig e-mailadres.");
