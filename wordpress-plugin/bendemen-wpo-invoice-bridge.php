@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: Bendemen WP Overnight Invoice Bridge
- * Description: Exposes final WP Overnight PDF invoices to the authenticated customer portal integration.
+ * Description: Exposes final WP Overnight PDF invoices to the authenticated Bendemen Supply Panel integration.
  * Version: 1.0.0
  */
 if (!defined('ABSPATH')) exit;
