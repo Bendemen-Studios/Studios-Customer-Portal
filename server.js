@@ -92,7 +92,7 @@ async function syncWooOrder(orderId) {
     const items=db.prepare("SELECT * FROM order_items WHERE order_id=?").all(orderId);
     const result=order.wc_order_id?await woo.updateWooOrder(order.wc_order_id,items):await woo.createWooOrder(order,items);
     if(result?.id){
-      db.prepare("UPDATE orders SET wc_order_id=?,wc_status=?,payment_url=? WHERE id=?").run(String(result.id),result.status||"pending",result.payment_url||null,orderId);
+      db.prepare("UPDATE orders SET wc_order_id=?,wc_order_number=?,wc_status=?,payment_url=? WHERE id=?").run(String(result.id),result.number!=null?String(result.number):null,result.status||"pending",result.payment_url||null,orderId);
       console.log(`WooCommerce order ${result.id} aangemaakt voor lokale order ${orderId}`);
     }
     return result;
@@ -234,7 +234,7 @@ app.get("/orders/:id",requireAuth,async(req,res)=>{
   const payBlock=fresh.payment_url&&!["processing","completed","refunded","cancelled"].includes(fresh.wc_status)?`<div class="payment-box"><div><strong>Deze bestelling staat nog open</strong><p>Betaal veilig via de betaalpagina van Bendemen Studios.</p></div><a class="primary" href="/orders/${id}/pay">Nu betalen <span>→</span></a></div>`:(fresh.wc_status?`<p class="hint">WooCommerce-status: ${esc(displayOrderStatus(fresh))}</p>`:'<p class="hint">De WooCommerce-betaallink verschijnt zodra de winkelkoppeling is ingesteld.</p>');
   const cancelBlock=canCancel?`<form method="post" action="/orders/${id}/cancel" class="cancel-box"><div><strong>Bestelling annuleren</strong><p>Dit kan zolang de bestelling nog niet in behandeling is genomen.</p></div><button class="danger">Bestelling annuleren</button></form>`:"";
   const invoiceBlock=fresh.wc_order_id&&["pending","on-hold","processing","completed","refunded"].includes(fresh.wc_status)?`<p class="invoice-action"><a class="secondary" href="/orders/${id}/invoice" target="_blank" rel="noopener">Factuur downloaden (PDF) →</a></p>`:"";
-  res.send(page(req,"Bestelling",`<a class="back" href="/orders">← Terug naar bestellingen</a><div class="page-title"><div class="eyebrow">BESTELLING SUPPLY-${o.local_order_no||id}${fresh.wc_order_id?` · WC #${fresh.wc_order_id}`:""}</div><h1>Bestelling bekijken</h1><p>Aangemaakt op ${esc(o.created_at)} · <span class="status">${esc(displayOrderStatus(fresh))}</span></p></div>${payBlock}${cancelBlock}${invoiceBlock}<div class="panel"><div class="table-wrap"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th><th>Totaal</th></tr></thead><tbody>${rows}</tbody></table></div><div class="total-line"><span>Ordertotaal</span><strong>${money(o.total_cents)}</strong></div></div>${fresh.allow_reorder!==0?`<form method="post" action="/orders/${id}/reorder" class="reorder-form"><div><strong>Dit product opnieuw bestellen?</strong><p>We maken direct een nieuwe order aan met dezelfde producten en aantallen.</p></div><button class="primary">Opnieuw bestellen <span>→</span></button></form>`:`<p class="hint">Dit is een maatwerkbestelling. Opnieuw bestellen is voor deze bestelling uitgeschakeld.</p>`}`));
+  res.send(page(req,"Bestelling",`<a class="back" href="/orders">← Terug naar bestellingen</a><div class="page-title"><div class="eyebrow">BESTELLING SUPPLY-${o.local_order_no||id}${fresh.wc_order_id?` · WC #${fresh.wc_order_id}`:""}</div><h1>Bestelling bekijken</h1><p>Aangemaakt op ${esc(o.created_at)} · <span class="status">${esc(displayOrderStatus(fresh))}</span></p></div>${payBlock}${cancelBlock}${invoiceBlock}${fresh.notes?`<div class="panel"><h2>Notities bij deze bestelling</h2><p style="white-space:pre-wrap">${esc(fresh.notes)}</p></div>`:""}<div class="panel"><div class="table-wrap"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th><th>Totaal</th></tr></thead><tbody>${rows}</tbody></table></div><div class="total-line"><span>Ordertotaal</span><strong>${money(o.total_cents)}</strong></div></div>${fresh.allow_reorder!==0?`<form method="post" action="/orders/${id}/reorder" class="reorder-form"><div><strong>Deze bestelling opnieuw bestellen?</strong><p>We maken een nieuwe order aan met dezelfde producten en aantallen.</p><label>Notitie bij herbestelling (optioneel)<textarea name="notes" rows="2" maxlength="2000" placeholder="Bijvoorbeeld: graag dezelfde uitvoering en verpakking"></textarea></label></div><button class="primary">Opnieuw bestellen <span>→</span></button></form>`:`<p class="hint">Dit is een maatwerkbestelling. Opnieuw bestellen is voor deze bestelling uitgeschakeld.</p>`}`));
 });
 app.get("/orders/:id/pay",requireAuth,(req,res)=>{
   const id=Number(req.params.id),order=db.prepare("SELECT id,payment_url,wc_status,workflow_status FROM orders WHERE id=? AND user_id=?").get(id,req.session.user.id);
@@ -261,7 +261,8 @@ app.post("/orders/:id/reorder",requireAuth,async(req,res)=>{
   const id=Number(req.params.id),order=db.prepare("SELECT * FROM orders WHERE id=? AND user_id=?").get(id,req.session.user.id);
   if(!order)return res.status(404).send("Bestelling niet gevonden.");
   const lines=orderItems(id).map(x=>({product_name:x.product_name,quantity:x.quantity,unit_price_cents:x.unit_price_cents}));
-  try{const newId=createOrder(req.session.user.id,lines,id,"Herbestelling");await syncWooOrder(newId);await sendOrderWebhook(newId);res.redirect(`/orders/${newId}`);}catch(err){console.error(err);res.status(500).send("Herbestelling maken is mislukt.");}
+  const notes=String(req.body.notes||"").trim().slice(0,2000);
+  try{const newId=createOrder(req.session.user.id,lines,id,notes||"Herbestelling");await syncWooOrder(newId);await sendOrderWebhook(newId);res.redirect(`/orders/${newId}`);}catch(err){console.error(err);res.status(500).send("Herbestelling maken is mislukt.");}
 });
 app.post("/orders/:id/cancel",requireAuth,(req,res)=>{
   const id=Number(req.params.id),order=db.prepare("SELECT * FROM orders WHERE id=? AND user_id=?").get(id,req.session.user.id);
@@ -278,11 +279,11 @@ app.get("/admin",requireAuth,requireAdmin,(req,res)=>{
  res.send(page(req,"Beheer",'<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Alleen WooCommerce-klanten die je hier toevoegt krijgen toegang.</p><div class="row-actions"><a class="primary inline" href="/admin/customers/search">Klant toevoegen →</a><a class="secondary" href="/admin/orders">Orderoverzicht →</a></div></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>WooCommerce</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen klanten toegevoegd.</td></tr>')+'</tbody></table></div>'));
 });
 app.get("/admin/orders",requireAuth,requireAdmin,(req,res)=>{
- const rows=db.prepare(`SELECT o.id,o.local_order_no,o.created_at,o.total_cents,o.status,o.wc_status,o.wc_order_id,o.payment_url,u.name customer_name,u.email customer_email,
+ const rows=db.prepare(`SELECT o.id,o.local_order_no,o.created_at,o.total_cents,o.status,o.wc_status,o.wc_order_id,o.wc_order_number,o.payment_url,u.name customer_name,u.email customer_email,
  (SELECT group_concat(oi.quantity || '× ' || oi.product_name, ', ') FROM order_items oi WHERE oi.order_id=o.id) summary
  FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.id DESC LIMIT 500`).all();
  const body='<a class="back" href="/admin">← Beheer</a><div class="page-title"><div class="eyebrow">BEHEER</div><h1>Orderoverzicht</h1><p>Lokale bestellingen en hun WooCommerce-koppeling.</p></div><div class="panel table-wrap"><table><thead><tr><th>Lokale order</th><th>Klant</th><th>Producten</th><th>Datum</th><th>Bedrag</th><th>WooCommerce ordernummer</th><th>WooCommerce status</th></tr></thead><tbody>'+
- (rows.map(o=>'<tr><td><strong>SUPPLY-'+String(o.local_order_no||o.id)+'</strong></td><td>'+esc(o.customer_name)+'<small>'+esc(o.customer_email)+'</small></td><td>'+esc(o.summary||'Geen orderregels')+'</td><td>'+esc(o.created_at)+'</td><td>'+money(o.total_cents)+'</td><td>'+(o.wc_order_id?'#'+esc(o.wc_order_id):'Niet gekoppeld')+'</td><td>'+esc(o.wc_status||'—')+'</td></tr>').join('')||'<tr><td colspan="7">Nog geen bestellingen.</td></tr>')+
+ (rows.map(o=>'<tr><td><strong>SUPPLY-'+String(o.local_order_no||o.id)+'</strong></td><td>'+esc(o.customer_name)+'<small>'+esc(o.customer_email)+'</small></td><td>'+esc(o.summary||'Geen orderregels')+'</td><td>'+esc(o.created_at)+'</td><td>'+money(o.total_cents)+'</td><td>'+(o.wc_order_id?'#'+esc(o.wc_order_number||o.wc_order_id):'Niet gekoppeld')+'</td><td>'+esc(o.wc_status||'—')+'</td></tr>').join('')||'<tr><td colspan="7">Nog geen bestellingen.</td></tr>')+
  '</tbody></table></div><p class="hint">Toont de laatste 500 lokale bestellingen.</p>';
  res.send(page(req,"Orderoverzicht",body));
 });
@@ -315,10 +316,31 @@ app.post("/admin/customers/:id/access",requireAuth,requireAdmin,(req,res)=>{
   res.redirect("/admin");
 });
 app.get("/admin/customers/:id",requireAuth,requireAdmin,(req,res)=>{
-  const id=Number(req.params.id),customer=db.prepare("SELECT * FROM users WHERE id=? AND role='customer'").get(id);
-  if(!customer)return res.status(404).send("Klant niet gevonden.");
-  const orders=getOrders(id);
-  res.send(page(req,"Klant",`<h1>${esc(customer.name)}</h1><p>${esc(customer.email)}</p><div class="panel">${orders.map(o=>orderCard(o)+`<a class="textlink" href="/admin/orders/${o.id}/products">Producten beheren →</a>`).join("")}</div>`));
+ const id=Number(req.params.id),customer=db.prepare("SELECT * FROM users WHERE id=? AND role='customer'").get(id);
+ if(!customer)return res.status(404).send("Klant niet gevonden.");
+ const q=String(req.query.q||"").trim().toLowerCase();
+ const all=db.prepare(`SELECT o.*, 'SUPPLY-' || COALESCE(o.local_order_no,o.id) order_number,
+ strftime('%d-%m-%Y',o.created_at) date,
+ (SELECT group_concat(oi.quantity || '× ' || oi.product_name, ', ') FROM order_items oi WHERE oi.order_id=o.id) summary
+ FROM orders o WHERE o.user_id=? ORDER BY o.id DESC`).all(id);
+ const orders=q?all.filter(o=>[o.order_number,o.wc_order_number,o.wc_order_id,o.summary,o.notes,o.created_at].some(v=>String(v||"").toLowerCase().includes(q))):all;
+ const rows=orders.map(o=>'<tr><td><input type="checkbox" name="order_ids" value="'+o.id+'" aria-label="Selecteer '+esc(o.order_number)+'"></td><td><strong>'+esc(o.order_number)+'</strong><small>'+esc(o.created_at)+'</small></td><td>'+esc(o.summary||"Geen orderregels")+'</td><td>'+money(o.total_cents)+'</td><td><a class="textlink" href="/admin/orders/'+o.id+'/products">Aanpassen</a></td></tr>').join("");
+ const body='<a class="back" href="/admin">← Klanten</a><div class="page-title"><h1>'+esc(customer.name)+'</h1><p>'+esc(customer.email)+'</p></div><div class="panel"><h2>Orders zoeken en herbestellen</h2><form method="get" action="/admin/customers/'+id+'" class="row-actions"><input name="q" value="'+esc(req.query.q||"")+'" placeholder="Zoek SUPPLY-nummer, WooCommerce-nummer of product"><button class="secondary">Zoeken</button><a class="textlink" href="/admin/customers/'+id+'">Wissen</a></form><form method="post" action="/admin/customers/'+id+'/reorder" class="stack"><div class="table-wrap"><table><thead><tr><th>Selecteer</th><th>Order</th><th>Producten</th><th>Bedrag</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Geen orders gevonden.</td></tr>')+'</tbody></table></div><label>Notitie bij herbestelling<textarea name="notes" rows="3" maxlength="2000" placeholder="Bijvoorbeeld: klant wil dezelfde producten, maar levering op vrijdag"></textarea></label><button class="primary">Geselecteerde orders herbestellen</button></form></div>';
+ res.send(page(req,"Klant",body));
+});
+app.post("/admin/customers/:id/reorder",requireAuth,requireAdmin,async(req,res)=>{
+ const customerId=Number(req.params.id),customer=db.prepare("SELECT id FROM users WHERE id=? AND role='customer' AND active=1").get(customerId);
+ if(!customer)return res.status(404).send("Klant niet gevonden.");
+ const raw=req.body.order_ids||[],ids=[...new Set((Array.isArray(raw)?raw:[raw]).map(Number).filter(n=>Number.isSafeInteger(n)&&n>0))];
+ if(!ids.length)return res.status(400).send("Selecteer minimaal één bestaande order.");
+ const placeholders=ids.map(()=>"?").join(",");
+ const selected=db.prepare("SELECT id FROM orders WHERE user_id=? AND id IN ("+placeholders+")").all(customerId,...ids);
+ if(selected.length!==ids.length)return res.status(400).send("Een of meer geselecteerde orders horen niet bij deze klant.");
+ const lines=ids.flatMap(id=>orderItems(id).map(x=>({product_name:x.product_name,quantity:x.quantity,unit_price_cents:x.unit_price_cents})));
+ if(!lines.length)return res.status(400).send("De geselecteerde orders bevatten geen orderregels.");
+ const notes=String(req.body.notes||"").trim().slice(0,2000)||"Herbestelling op verzoek van beheer";
+ try{const newId=createOrder(customerId,lines,null,notes);await syncWooOrder(newId);await sendOrderWebhook(newId);res.redirect("/orders/"+newId);}
+ catch(err){console.error("Admin customer reorder failed:",err.message);res.status(500).send("Herbestelling maken is mislukt.");}
 });
 
 
