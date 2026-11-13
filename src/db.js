@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS products (
  sku TEXT,
  description TEXT,
  price_cents INTEGER NOT NULL DEFAULT 0,
+ cost_cents INTEGER NOT NULL DEFAULT 0,
  product_url TEXT,
  image_url TEXT,
  source TEXT NOT NULL DEFAULT 'manual',
@@ -122,6 +123,7 @@ function addColumn(table, column, definition) {
  if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 addColumn("users", "active", "INTEGER NOT NULL DEFAULT 1");
+addColumn("products", "cost_cents", "INTEGER NOT NULL DEFAULT 0");
 addColumn("users", "wc_customer_id", "TEXT");
 db.exec("UPDATE users SET active=0 WHERE role='customer' AND wc_customer_id IS NULL");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_wc_customer ON users(wc_customer_id) WHERE wc_customer_id IS NOT NULL");
