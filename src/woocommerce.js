@@ -1,6 +1,17 @@
 const axios=require("axios");
 function config(){const base=(process.env.WC_STORE_URL||"").replace(/\/$/,"");if(!base||!process.env.WC_CONSUMER_KEY||!process.env.WC_CONSUMER_SECRET)throw new Error("WooCommerce API configuration is incomplete");return{base,key:process.env.WC_CONSUMER_KEY,secret:process.env.WC_CONSUMER_SECRET};}
-async function request(endpoint,method="GET",data){const c=config();const auth=Buffer.from(c.key+":"+c.secret).toString("base64");const r=await axios({url:`${c.base}/wp-json/wc/v3/${endpoint}`,method,data,headers:{Authorization:`Basic ${auth}`},timeout:20000});return r.data;}
+async function request(endpoint,method="GET",data){
+ const c=config(),auth=Buffer.from(c.key+":"+c.secret).toString("base64");
+ const timeout=Math.max(5000,Math.min(120000,Number(process.env.WC_API_TIMEOUT_MS)||60000));
+ try{
+  const response=await axios({url:`${c.base}/wp-json/wc/v3/${endpoint}`,method,data,headers:{Authorization:`Basic ${auth}`},timeout});
+  return response.data;
+ }catch(err){
+  const detail=err.code||err.response?.status||err.message;
+  console.error("WooCommerce API request failed:",{method,endpoint,code:detail,timeoutMs:timeout,baseUrl:c.base});
+  throw err;
+ }
+}
 async function listProducts(page=1,perPage=100){return request(`products?status=any&per_page=${Math.min(100,perPage)}&page=${page}`);}
 async function searchCustomers(query,page=1){return request(`customers?search=${encodeURIComponent(query)}&per_page=30&page=${page}`);}
 async function getCustomer(id){return request(`customers/${encodeURIComponent(id)}`);}
