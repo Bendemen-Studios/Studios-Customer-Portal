@@ -75,7 +75,7 @@ function getOrders(userId, limit = 100) {
   return db.prepare(`SELECT o.*, 'BDS-' || printf('%06d',o.id) order_number,
     strftime('%d-%m-%Y',o.created_at) date,
     (SELECT group_concat(oi.quantity || '× ' || oi.product_name, ', ') FROM order_items oi WHERE oi.order_id=o.id) summary
-    FROM orders o WHERE o.user_id=? ORDER BY o.id DESC LIMIT ?`).all(userId, limit);
+    FROM orders o WHERE o.user_id=? AND o.show_in_history=1 ORDER BY o.id DESC LIMIT ?`).all(userId, limit);
 }
 async function syncWooOrder(orderId) {
   try {
@@ -286,7 +286,7 @@ app.post("/admin/orders/new",requireAuth,requireAdmin,(req,res)=>{
      productId="local:"+String(p.lastInsertRowid);
    }
    const total=price*qty;
-   const order=db.prepare("INSERT INTO orders (user_id,status,total_cents,notes,allow_reorder) VALUES (?,'Nieuw',?,?,0)").run(user.id,total,"Handmatig toegevoegd door beheer — maatwerk / handmatige bestelling");
+   const order=db.prepare("INSERT INTO orders (user_id,status,total_cents,notes,allow_reorder,show_in_history) VALUES (?,'Nieuw',?,?,0,1)").run(user.id,total,"Handmatig toegevoegd door beheer — maatwerk / handmatige bestelling");
    db.prepare("INSERT INTO order_items (order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)").run(order.lastInsertRowid,productId,name,qty,price);
    return Number(order.lastInsertRowid);
  });
