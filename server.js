@@ -94,9 +94,11 @@ async function syncWooOrder(orderId) {
     if(result?.id){
       db.prepare("UPDATE orders SET wc_order_id=?,wc_order_number=?,wc_status=?,payment_url=? WHERE id=?").run(String(result.id),result.number!=null?String(result.number):null,result.status||"pending",result.payment_url||null,orderId);
       console.log(`WooCommerce order ${result.id} aangemaakt voor lokale order ${orderId}`);
-      if(!order.wc_order_id){
-        try{await woo.getInvoicePdf(result.id);console.log(`WP Overnight-factuur gegenereerd voor WooCommerce order ${result.id}`);}
-        catch(invoiceError){console.error(`Factuur genereren mislukt voor WooCommerce order ${result.id}:`,invoiceError.message);}
+      try{
+        await woo.getInvoicePdf(result.id);
+        console.log(`WP Overnight-factuur beschikbaar voor WooCommerce order ${result.id}`);
+      }catch(invoiceError){
+        console.error(`Factuur genereren mislukt voor WooCommerce order ${result.id}:`,invoiceError.response?.data?.message||invoiceError.message);
       }
     }
     return result;
