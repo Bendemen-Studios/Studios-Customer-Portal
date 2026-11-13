@@ -24,6 +24,7 @@ const express = require("express");
 const session = require("express-session");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+const compression = require("compression");
 const bcrypt = require("bcryptjs");
 const db = require("./src/db");
 const { requireAuth, requireAdmin } = require("./src/auth");
@@ -35,6 +36,7 @@ const PORT = Number(process.env.SERVER_PORT || process.env.PORT || 3000);
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
+app.use(compression({ threshold: 1024, level: 6 }));
 app.use(express.urlencoded({ extended: false, limit: "2mb", verify: (req,res,buf) => { req.rawBody = Buffer.from(buf); } }));
 app.use(express.json({ limit: "2mb", verify: (req,res,buf) => { req.rawBody = Buffer.from(buf); } }));
 class SQLiteSessionStore extends session.Store {
@@ -48,7 +50,13 @@ app.use(session({
   resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 8 * 60 * 60 * 1000 }
 }));
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "public"), {
+  maxAge: "1h", etag: true, lastModified: true,
+  setHeaders(res, filePath) {
+    if (/\.(?:png|jpe?g|webp|svg|ico|woff2?)$/i.test(filePath)) res.setHeader("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400");
+    else res.setHeader("Cache-Control", "public, max-age=3600, stale-while-revalidate=300");
+  }
+}));
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const euro = cents => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format((cents || 0) / 100);
