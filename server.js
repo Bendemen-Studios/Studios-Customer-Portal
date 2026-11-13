@@ -221,7 +221,7 @@ app.get("/admin/products",requireAuth,requireAdmin,(req,res)=>{
 });
 app.post("/admin/products",requireAuth,requireAdmin,(req,res)=>{
  const name=String(req.body.name||"").trim(),sku=String(req.body.sku||"").trim(),price=moneyInput(req.body.price),cost=moneyInput(req.body.cost||"0"),url=String(req.body.product_url||"").trim();
- if(!name||!Number.isSafeInteger(price)||price<0||url&&!/^https?:\/\//i.test(url))return res.status(400).send("Ongeldig product of bedrag.");
+ if(!name||!Number.isSafeInteger(price)||price<0||!Number.isSafeInteger(cost)||cost<0||url&&!/^https?:\/\//i.test(url))return res.status(400).send("Ongeldig product, verkoopprijs of inkoopkosten.");
  db.prepare("INSERT INTO products (name,sku,price_cents,cost_cents,product_url,source) VALUES (?,?,?,?,?,'manual')").run(name,sku||null,price,cost,url||null);res.redirect("/admin/products");
 });
 app.post("/admin/products/sync",requireAuth,requireAdmin,async(req,res)=>{
