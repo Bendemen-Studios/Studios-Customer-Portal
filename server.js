@@ -330,7 +330,7 @@ app.get("/admin",requireAuth,requireAdmin,(req,res)=>{
  res.send(page(req,"Beheer",'<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Alleen WooCommerce-klanten die je hier toevoegt krijgen toegang.</p><div class="row-actions"><a class="primary inline" href="/admin/customers/search">Klant toevoegen →</a><a class="secondary" href="/admin/orders">Orderoverzicht →</a></div></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>WooCommerce</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen klanten toegevoegd.</td></tr>')+'</tbody></table></div>'));
 });
 app.get("/admin/orders",requireAuth,requireAdmin,(req,res)=>{
- const rows=db.prepare(`SELECT o.id,o.created_at,o.total_cents,o.status,o.wc_status,o.wc_order_id,o.payment_url,u.name customer_name,u.email customer_email,
+ const rows=db.prepare(`SELECT o.id,o.local_order_no,o.created_at,o.total_cents,o.status,o.wc_status,o.wc_order_id,o.payment_url,u.name customer_name,u.email customer_email,
  (SELECT group_concat(oi.quantity || '× ' || oi.product_name, ', ') FROM order_items oi WHERE oi.order_id=o.id) summary
  FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.id DESC LIMIT 500`).all();
  const body='<a class="back" href="/admin">← Beheer</a><div class="page-title"><div class="eyebrow">BEHEER</div><h1>Orderoverzicht</h1><p>Lokale bestellingen en hun WooCommerce-koppeling.</p></div><div class="panel table-wrap"><table><thead><tr><th>Lokale order</th><th>Klant</th><th>Producten</th><th>Datum</th><th>Bedrag</th><th>WooCommerce</th></tr></thead><tbody>'+
