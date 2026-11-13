@@ -1,29 +1,211 @@
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
-const Database=require("better-sqlite3"), mysql=require("mysql2/promise"), path=require("path");
-for(const k of ["DB_HOST","DB_NAME","DB_USER","DB_PASSWORD"])if(!process.env[k])throw new Error(k+" ontbreekt in Pterodactyl environment.");
-const sqlite=new Database(path.resolve(process.env.DB_PATH||"./data/bendemen.sqlite"),{readonly:true,fileMustExist:true});
-const q=s=>"\`"+String(s).replace(/\`/g,"\`\`")+"\`";
-function type(c){if(c.pk)return "BIGINT NOT NULL AUTO_INCREMENT";const t=String(c.type||"").toUpperCase();if(t.includes("INT"))return "BIGINT";if(/REAL|FLOA|DOUB/.test(t))return "DOUBLE";if(t.includes("BLOB"))return "LONGBLOB";if(t.includes("BOOL"))return "TINYINT(1)";return "LONGTEXT";}
-async function main(){
- const pool=mysql.createPool({host:process.env.DB_HOST,port:Number(process.env.DB_PORT||3306),database:process.env.DB_NAME,user:process.env.DB_USER,password:process.env.DB_PASSWORD,charset:"utf8mb4",connectionLimit:2,connectTimeout:10000});
- const c=await pool.getConnection();try{
- await c.query("SELECT 1");await c.query("SET FOREIGN_KEY_CHECKS=0");
- const tables=sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY CASE name WHEN 'users' THEN 1 WHEN 'orders' THEN 2 ELSE 3 END").all().map(x=>x.name);const report=[];
- for(const table of tables){
-  const cols=sqlite.prepare("PRAGMA table_info("+q(table)+")").all();if(!cols.length)continue;
-  const defs=cols.map(x=>q(x.name)+" "+type(x)+(x.notnull&&!x.pk?" NOT NULL":"")+(x.dflt_value!==null&&x.dflt_value!==undefined&&!x.pk?" DEFAULT "+x.dflt_value:""));
-  await c.query("CREATE TABLE IF NOT EXISTS "+q(table)+" ("+defs.join(",")+") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-  const rows=sqlite.prepare("SELECT * FROM "+q(table)).all(),[count]=await c.query("SELECT COUNT(*) n FROM "+q(table));
-  if(Number(count[0].n)>0){report.push({table,source:rows.length,target:Number(count[0].n),status:"bestaat al; niet overschreven"});continue;}
-  if(rows.length){const sql="INSERT INTO "+q(table)+" ("+cols.map(x=>q(x.name)).join(",")+") VALUES ("+cols.map(()=>"?").join(",")+")";for(let i=0;i<rows.length;i+=100)for(const row of rows.slice(i,i+100))await c.query(sql,cols.map(x=>row[x.name]));}
-  for(const idx of sqlite.prepare("PRAGMA index_list("+q(table)+")").all()){
-   if(idx.origin==="pk"||idx.partial)continue;const ic=sqlite.prepare("PRAGMA index_info("+q(idx.name)+")").all().map(x=>q(x.name));if(!ic.length)continue;
-   try{await c.query("CREATE "+(idx.unique?"UNIQUE ":"")+"INDEX "+q("mig_"+table+"_"+idx.name)+" ON "+q(table)+" ("+ic.join(",")+")");}catch(e){if(!["ER_DUP_KEYNAME","ER_DUP_ENTRY"].includes(e.code))throw e;}
-  }
-  const [v]=await c.query("SELECT COUNT(*) n FROM "+q(table));if(Number(v[0].n)!==rows.length)throw new Error("Rijcontrole mislukt: "+table);
-  report.push({table,source:rows.length,target:Number(v[0].n),status:"OK"});
- }
- await c.query("SET FOREIGN_KEY_CHECKS=1");console.log(JSON.stringify({message:"Kopie gemaakt; SQLite blijft actief. Controleer rapport vóór omschakeling.",tables:report},null,2));
- }finally{c.release();await pool.end();sqlite.close();}
+
+const Database = require("better-sqlite3");
+const mysql = require("mysql2/promise");
+const path = require("path");
+const crypto = require("crypto");
+
+const required = ["DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD"];
+for (const key of required) {
+  if (!process.env[key]) throw new Error(key + " ontbreekt in de Pterodactyl environment.");
 }
-main().catch(e=>{console.error("Migratie gestopt:",e.message);process.exitCode=1;});
+
+const sqlitePath = path.resolve(process.env.DB_PATH || "./data/bendemen.sqlite");
+const sqlite = new Database(sqlitePath, { readonly: true, fileMustExist: true });
+const quote = value => "\`" + String(value).replace(/\`/g, "\`\`") + "\`";
+
+function mysqlType(column, indexedColumns) {
+  const name = column.name;
+  const type = String(column.type || "").toUpperCase();
+  if (column.pk && type.includes("INT")) return "BIGINT NOT NULL AUTO_INCREMENT";
+  if (column.pk && !type.includes("INT")) return "VARCHAR(255) NOT NULL";
+  if (/INT/.test(type)) return "BIGINT";
+  if (/REAL|FLOA|DOUB/.test(type)) return "DOUBLE";
+  if (/BLOB/.test(type)) return "LONGBLOB";
+  if (/BOOL/.test(type)) return "TINYINT(1)";
+  if (["email"].includes(name)) return "VARCHAR(320)";
+  if (["sid"].includes(name)) return "VARCHAR(255)";
+  if (indexedColumns.has(name) || /(^|_)(id|sku|status|role|interval|currency|source)$/.test(name)) return "VARCHAR(191)";
+  if (/(^|_)(date|at)$/.test(name) || name.endsWith("_for") || name.endsWith("_payment")) return "VARCHAR(64)";
+  return "LONGTEXT";
+}
+
+function safeDefault(value, column) {
+  if (value === null || value === undefined) return "";
+  const raw = String(value).trim();
+  if (/^CURRENT_TIMESTAMP(?:\\(\\))?$/i.test(raw)) return " DEFAULT CURRENT_TIMESTAMP";
+  if (/^\\(date\\('now'\\)\\)$/i.test(raw)) return " DEFAULT (CURRENT_DATE)";
+  if (/^-?\\d+(?:\\.\\d+)?$/.test(raw)) return " DEFAULT " + raw;
+  if (/^'.*'$/.test(raw)) return " DEFAULT " + raw;
+  // SQLite expression defaults are not copied unless explicitly mapped above.
+  return "";
+}
+
+function digestRows(rows, columns) {
+  const hash = crypto.createHash("sha256");
+  for (const row of rows) {
+    const values = columns.map(column => {
+      const value = row[column.name];
+      if (Buffer.isBuffer(value)) return { buffer: value.toString("base64") };
+      return value === undefined ? null : value;
+    });
+    hash.update(JSON.stringify(values) + "\n");
+  }
+  return hash.digest("hex");
+}
+
+async function main() {
+  const pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT || 3306),
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    charset: "utf8mb4",
+    connectionLimit: 2,
+    connectTimeout: 10000,
+    supportBigNumbers: true,
+    bigNumberStrings: true
+  });
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.query("SELECT 1");
+    const tables = sqlite.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY CASE name WHEN 'users' THEN 1 WHEN 'products' THEN 2 WHEN 'recurring_orders' THEN 3 WHEN 'orders' THEN 4 ELSE 5 END, name"
+    ).all().map(row => row.name);
+
+    const report = [];
+    for (const table of tables) {
+      const columns = sqlite.prepare("PRAGMA table_info(" + quote(table) + ")").all();
+      if (!columns.length) continue;
+
+      const indexes = sqlite.prepare("PRAGMA index_list(" + quote(table) + ")").all();
+      const indexedColumns = new Set();
+      for (const index of indexes) {
+        for (const column of sqlite.prepare("PRAGMA index_info(" + quote(index.name) + ")").all()) {
+          indexedColumns.add(column.name);
+        }
+      }
+
+      const foreignKeys = sqlite.prepare("PRAGMA foreign_key_list(" + quote(table) + ")").all();
+      const definitions = columns.map(column => {
+        const type = mysqlType(column, indexedColumns);
+        const notNull = column.notnull && !column.pk ? " NOT NULL" : "";
+        const defaultValue = column.pk ? "" : safeDefault(column.dflt_value, column);
+        return quote(column.name) + " " + type + notNull + defaultValue;
+      });
+
+      const primaryKey = columns.filter(column => column.pk).sort((a, b) => a.pk - b.pk);
+      if (primaryKey.length > 1) {
+        definitions.push("PRIMARY KEY (" + primaryKey.map(column => quote(column.name)).join(",") + ")");
+        for (const column of primaryKey) {
+          const position = definitions.findIndex(definition => definition.startsWith(quote(column.name) + " "));
+          definitions[position] = definitions[position].replace(" NOT NULL AUTO_INCREMENT", " NOT NULL");
+        }
+      }
+
+      for (const fk of foreignKeys) {
+        definitions.push(
+          "CONSTRAINT " + quote("fk_" + table + "_" + fk.id) +
+          " FOREIGN KEY (" + quote(fk.from) + ") REFERENCES " + quote(fk.table) +
+          " (" + quote(fk.to) + ") ON DELETE " +
+          (fk.on_delete || "NO ACTION").toUpperCase().replace("RESTRICT", "RESTRICT")
+        );
+      }
+
+      await connection.query(
+        "CREATE TABLE IF NOT EXISTS " + quote(table) + " (" + definitions.join(",") +
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+      );
+
+      const sourceRows = sqlite.prepare("SELECT * FROM " + quote(table)).all();
+      const [targetRows] = await connection.query("SELECT COUNT(*) AS total FROM " + quote(table));
+      const existingCount = Number(targetRows[0].total);
+      if (existingCount !== 0) {
+        throw new Error(
+          "Doeltabel " + table + " bevat al " + existingCount +
+          " rijen. Migratie is afgebroken zonder bestaande data te overschrijven. Gebruik een lege database."
+        );
+      }
+
+      if (sourceRows.length) {
+        const insertSql = "INSERT INTO " + quote(table) + " (" +
+          columns.map(column => quote(column.name)).join(",") + ") VALUES (" +
+          columns.map(() => "?").join(",") + ")";
+        await connection.query("SET FOREIGN_KEY_CHECKS=0");
+        try {
+          await connection.beginTransaction();
+          for (let offset = 0; offset < sourceRows.length; offset += 100) {
+            const batch = sourceRows.slice(offset, offset + 100);
+            for (const row of batch) {
+              await connection.execute(insertSql, columns.map(column => row[column.name]));
+            }
+          }
+          await connection.commit();
+        } catch (error) {
+          await connection.rollback();
+          throw error;
+        } finally {
+          await connection.query("SET FOREIGN_KEY_CHECKS=1");
+        }
+      }
+
+      for (const index of indexes) {
+        if (index.origin === "pk" || index.partial) continue;
+        const indexColumns = sqlite.prepare("PRAGMA index_info(" + quote(index.name) + ")").all();
+        if (!indexColumns.length) continue;
+        const indexName = "mig_" + table + "_" + index.name;
+        const indexSql = "CREATE " + (index.unique ? "UNIQUE " : "") + "INDEX " +
+          quote(indexName) + " ON " + quote(table) + " (" +
+          indexColumns.map(column => quote(column.name)).join(",") + ")";
+        try {
+          await connection.query(indexSql);
+        } catch (error) {
+          if (error.code !== "ER_DUP_KEYNAME" && error.code !== "ER_DUP_ENTRY") throw error;
+        }
+      }
+
+      const [verified] = await connection.query("SELECT COUNT(*) AS total FROM " + quote(table));
+      const targetCount = Number(verified[0].total);
+      if (targetCount !== sourceRows.length) {
+        throw new Error("Rijcontrole mislukt voor " + table + ": SQLite=" + sourceRows.length + ", MySQL=" + targetCount);
+      }
+
+      const targetData = [];
+      const [rows] = await connection.query("SELECT * FROM " + quote(table) + " ORDER BY " +
+        (primaryKey.length ? primaryKey.map(column => quote(column.name)).join(",") : quote(columns[0].name)));
+      targetData.push(...rows);
+      const sourceDigest = digestRows(sourceRows, columns);
+      const targetDigest = digestRows(targetData, columns);
+      if (sourceDigest !== targetDigest) {
+        throw new Error("Inhoudscontrole mislukt voor " + table + "; SQLite blijft ongewijzigd.");
+      }
+
+      const autoIncrementColumn = columns.find(column => column.pk && String(column.type).toUpperCase().includes("INT"));
+      if (autoIncrementColumn && sourceRows.length) {
+        const maxId = Math.max(...sourceRows.map(row => Number(row[autoIncrementColumn.name]) || 0));
+        if (maxId > 0) await connection.query("ALTER TABLE " + quote(table) + " AUTO_INCREMENT = " + (maxId + 1));
+      }
+
+      report.push({ table, rows: sourceRows.length, sha256: sourceDigest, status: "geverifieerd" });
+    }
+
+    console.log(JSON.stringify({
+      message: "Migratiekopie afgerond en per tabel gecontroleerd. De applicatie gebruikt nog SQLite.",
+      sqlite: sqlitePath,
+      mysqlDatabase: process.env.DB_NAME,
+      tables: report
+    }, null, 2));
+  } finally {
+    if (connection) connection.release();
+    await pool.end();
+    sqlite.close();
+  }
+}
+
+main().catch(error => {
+  console.error("MySQL-migratie afgebroken:", error.message);
+  process.exitCode = 1;
+});
