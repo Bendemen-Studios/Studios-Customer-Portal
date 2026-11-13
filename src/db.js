@@ -139,6 +139,8 @@ addColumn("orders", "source_order_id", "INTEGER");
 addColumn("orders", "notes", "TEXT");
 addColumn("orders", "recurring_order_id", "INTEGER");
 addColumn("orders", "allow_reorder", "INTEGER NOT NULL DEFAULT 1");
+addColumn("orders", "show_in_history", "INTEGER NOT NULL DEFAULT 0");
+db.exec("UPDATE orders SET show_in_history=1 WHERE allow_reorder=0 AND notes LIKE 'Handmatig toegevoegd door beheer%'");
 addColumn("monthly_costs", "interval", "TEXT NOT NULL DEFAULT 'month'");
 addColumn("monthly_costs", "wc_order_id", "TEXT");
 addColumn("monthly_costs", "notes", "TEXT");
