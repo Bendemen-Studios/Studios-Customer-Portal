@@ -103,7 +103,7 @@ async function sendOrderWebhook(orderId) {
   const o = db.prepare(`SELECT o.*,u.name customer_name,u.email customer_email FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=?`).get(orderId);
   const items = orderItems(orderId).map(i => ({ productName: i.product_name, quantity: i.quantity, unitPriceCents: i.unit_price_cents }));
   const payload = { event:"order.created", order:{id:o.id,orderNumber:`BDS-${String(o.id).padStart(6,"0")}`,customer:{id:o.user_id,name:o.customer_name,email:o.customer_email},items,totalCents:o.total_cents,currency:o.currency,status:o.status,createdAt:o.created_at} };
-  try { const headers={"content-type":"application/json"}; if(process.env.ORDER_WEBHOOK_TOKEN) headers.authorization=`Bearer ${process.env.ORDER_WEBHOOK_TOKEN}`; const response=await fetch(url,{method:"POST",headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(8000)}); if(!response.ok) console.error(`Order webhook HTTP ${response.status}`); }
+  try { const headers={"content-type":"application/json"}; if(process.env.ORDER_WEBHOOK_TOKEN) headers.authorization=`Bearer ${process.env.ORDER_WEBHOOK_TOKEN}`; const response=await fetch(url,{method:"POST",headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(Math.max(5000,Math.min(120000,Number(process.env.ORDER_WEBHOOK_TIMEOUT_MS)||20000)))}); if(!response.ok) console.error(`Order webhook HTTP ${response.status}`); }
   catch(err){console.error("Order webhook failed:",err.message);}
 }
 function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrderId=null) {
