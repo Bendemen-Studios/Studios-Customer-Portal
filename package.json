@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "create-admin": "node scripts/create-admin.js",
-    "migrate:mysql": "node scripts/migrate-to-mysql.js"
+    "migrate:mysql": "node migrate.js"
   },
   "engines": {
     "node": ">=20"
