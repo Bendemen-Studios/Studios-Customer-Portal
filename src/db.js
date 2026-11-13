@@ -138,6 +138,7 @@ addColumn("orders", "currency", "TEXT NOT NULL DEFAULT 'EUR'");
 addColumn("orders", "source_order_id", "INTEGER");
 addColumn("orders", "notes", "TEXT");
 addColumn("orders", "recurring_order_id", "INTEGER");
+addColumn("orders", "allow_reorder", "INTEGER NOT NULL DEFAULT 1");
 addColumn("monthly_costs", "interval", "TEXT NOT NULL DEFAULT 'month'");
 addColumn("monthly_costs", "wc_order_id", "TEXT");
 addColumn("monthly_costs", "notes", "TEXT");
