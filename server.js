@@ -261,7 +261,7 @@ app.post("/admin/orders/:id/custom-item",requireAuth,requireAdmin,(req,res)=>{
 app.post("/admin/orders/:id/products",requireAuth,requireAdmin,(req,res)=>{
  const id=Number(req.params.id),product=db.prepare("SELECT * FROM products WHERE id=? AND active=1").get(Number(req.body.product_id)),qty=Number(req.body.quantity);
  const order=db.prepare("SELECT id FROM orders WHERE id=?").get(id);if(!order||!product||!Number.isInteger(qty)||qty<1||qty>999)return res.status(400).send("Ongeldige bestelling, productkeuze of aantal.");
- db.prepare("INSERT INTO order_items (order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)").run(id,product.wc_product_id||String(product.id),product.name,qty,product.price_cents);
+ db.prepare("INSERT INTO order_items (order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)").run(id,product.wc_product_id||("local:"+String(product.id)),product.name,qty,product.price_cents);
  db.prepare("UPDATE orders SET total_cents=(SELECT COALESCE(SUM(quantity*unit_price_cents),0) FROM order_items WHERE order_id=?) WHERE id=?").run(id,id);
  res.redirect("/admin/orders/"+id+"/products");
 });
