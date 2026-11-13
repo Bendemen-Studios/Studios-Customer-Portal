@@ -1,4 +1,4 @@
-BENDEMEN CUSTOMER PANEL - PTERODACTYL
+BENDEMEN SUPPLY PANEL - PTERODACTYL
 - Node.js 20 or hoger.
 - Install command: npm install
 - Startup command: npm start
