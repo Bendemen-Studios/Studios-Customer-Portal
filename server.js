@@ -50,7 +50,7 @@ const money = euro;
 function page(req, title, body) {
   const user = req.session.user;
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · Bendemen Studios</title><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="stylesheet" href="/style.css"></head><body>
-  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/services">Diensten & kosten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a><a href="/admin/costs">Kosten</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
+  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/services">Diensten & kosten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
   <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Bendemen Supply Panel</span></footer></body></html>`;
 }
 function moneyInput(value) { return Math.round(Number(String(value).replace(",", ".")) * 100); }
@@ -126,13 +126,13 @@ app.get("/",requireAuth,(req,res)=>{
   const user=req.session.user,orders=getOrders(user.id,5);
   const monthly=db.prepare("SELECT COALESCE(SUM(amount_cents),0) total FROM monthly_costs WHERE user_id=? AND active=1").get(user.id).total;
   const orderSpend=db.prepare("SELECT COALESCE(SUM(total_cents),0) total FROM orders WHERE user_id=? AND strftime('%Y-%m',created_at)=strftime('%Y-%m','now')").get(user.id).total;
-  const body=`<div class="hero"><div><div class="eyebrow">BENDEMEN SUPPLY PANEL</div><h1>Goedendag, ${esc(user.name.split(" ")[0])}.</h1><p>Alles rondom jouw 3D-printbestellingen op één plek.</p></div><a class="primary inline" href="/orders">Mijn bestellingen <span>→</span></a></div>
+  const body=`<div class="hero"><div><div class="eyebrow">BENDEMEN SUPPLY PANEL</div><h1>Goedendag, ${esc(user.name.split(" ")[0])}.</h1><p>Alles rondom jouw Inkoop Bestellingen op één plek.</p></div><a class="primary inline" href="/orders">Mijn bestellingen <span>→</span></a></div>
   <div class="stats"><article class="stat"><span>Vaste maandkosten</span><strong>${money(monthly)}</strong><small>Actieve maandelijkse kosten</small></article><article class="stat"><span>Besteld deze maand</span><strong>${money(orderSpend)}</strong><small>Nieuwe orders deze maand</small></article><article class="stat"><span>Totaal bestellingen</span><strong>${db.prepare("SELECT COUNT(*) n FROM orders WHERE user_id=?").get(user.id).n}</strong><small>Alle geregistreerde orders</small></article></div>
   <section class="section-head"><div><div class="eyebrow">RECENT</div><h2>Recente bestellingen</h2></div><a class="textlink" href="/orders">Alle bestellingen →</a></section><div class="panel">${orders.length?orders.map(orderCard).join(""):'<div class="empty">Je hebt nog geen bestellingen.</div>'}</div>
   <div class="bottom-cta"><div><strong>Hetzelfde product nog een keer nodig?</strong><p>Bestel opnieuw vanuit je bestelgeschiedenis.</p></div><a class="secondary" href="/orders">Bekijk historie</a></div>`;
   res.send(page(req,"Dashboard",body));
 });
-app.get("/orders",requireAuth,(req,res)=>{const orders=getOrders(req.session.user.id);res.send(page(req,"Bestellingen",`<div class="page-title"><div class="eyebrow">JOUW OVERZICHT</div><h1>Bestellingen</h1><p>Bekijk je eerdere 3D-printorders en bestel ze eenvoudig opnieuw.</p></div><div class="panel">${orders.length?orders.map(orderCard).join(""):'<div class="empty">Nog geen bestellingen gevonden.</div>'}</div>`));});
+app.get("/orders",requireAuth,(req,res)=>{const orders=getOrders(req.session.user.id);res.send(page(req,"Bestellingen",`<div class="page-title"><div class="eyebrow">JOUW OVERZICHT</div><h1>Bestellingen</h1><p>Bekijk je eerdere inkoopbestellingen en bestel ze eenvoudig opnieuw.</p></div><div class="panel">${orders.length?orders.map(orderCard).join(""):'<div class="empty">Nog geen bestellingen gevonden.</div>'}</div>`));});
 app.get("/orders/:id",requireAuth,async(req,res)=>{
   const id=Number(req.params.id),o=db.prepare("SELECT * FROM orders WHERE id=? AND user_id=?").get(id,req.session.user.id);
   if(!o)return res.status(404).send(page(req,"Niet gevonden","<h1>Bestelling niet gevonden</h1>"));
@@ -235,7 +235,7 @@ app.post("/admin/products",requireAuth,requireAdmin,(req,res)=>{
 app.post("/admin/products/sync",requireAuth,requireAdmin,async(req,res)=>{
  try{
   let pageNo=1,count=0;
-  while(pageNo<=10){const list=await woo.listProducts(pageNo,100);if(!list.length)break;
+  while(true){const list=await woo.listProducts(pageNo,100);if(!list.length)break;
    const upsert=db.prepare("INSERT INTO products (wc_product_id,name,sku,description,price_cents,product_url,image_url,source,active,updated_at) VALUES (?,?,?,?,?,?,?,'woocommerce',1,CURRENT_TIMESTAMP) ON CONFLICT(wc_product_id) DO UPDATE SET name=excluded.name,sku=excluded.sku,description=excluded.description,price_cents=excluded.price_cents,product_url=excluded.product_url,image_url=excluded.image_url,active=1,updated_at=CURRENT_TIMESTAMP");
    const tx=db.transaction(items=>{for(const p of items){const cents=Math.round(Number(p.price||0)*100);upsert.run(String(p.id),p.name||'Product',p.sku||null,p.description||null,cents,p.permalink||null,p.images&&p.images[0]?p.images[0].src:null);}});
    tx(list);count+=list.length;if(list.length<100)break;pageNo++;
@@ -290,21 +290,7 @@ app.post("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=
  db.prepare("INSERT INTO recurring_order_items (recurring_order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)").run(id,p.wc_product_id||String(p.id),p.name,qty,p.price_cents);
  db.prepare("UPDATE recurring_orders SET amount_cents=(SELECT COALESCE(SUM(quantity*unit_price_cents),0) FROM recurring_order_items WHERE recurring_order_id=?) WHERE id=?").run(id,id);res.redirect("/admin/subscriptions/"+id+"/products");
 });
-app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>{
- const costs=db.prepare("SELECT * FROM expenses ORDER BY expense_date DESC,id DESC").all(),rows=costs.map(x=>'<tr><td>'+esc(x.expense_date)+'</td><td>'+esc(x.name)+'</td><td>'+money(x.amount_cents)+'</td><td>'+(x.wc_order_id?'WooCommerce #'+esc(x.wc_order_id):'<form method=\"post\" action=\"/admin/costs/'+x.id+'/sync\"><button class=\"secondary\">Naar WooCommerce sturen</button></form>')+'</td></tr>').join("");
- const products=db.prepare("SELECT id,name FROM products WHERE active=1 ORDER BY name").all(),options=products.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join("");
- res.send(page(req,"Kostenbeheer",'<div class="page-title"><h1>Kostenbeheer</h1><p>Registreer inkoop- en productkosten. Je kunt ze daarna als gemarkeerde kostenorder naar WooCommerce sturen.</p></div><div class="panel"><form method="post" action="/admin/costs" class="stack"><label>Omschrijving<input name="name" required maxlength="180"></label><label>Bedrag in euro<input name="amount" inputmode="decimal" required placeholder="0,00"></label><label>Datum<input name="expense_date" type="date"></label><label>Product (optioneel)<select name="product_id"><option value="">Geen product</option>'+options+'</select></label><label>Notitie<input name="notes" maxlength="500"></label><button class="primary">Kosten opslaan</button></form></div><div class="panel"><table><thead><tr><th>Datum</th><th>Omschrijving</th><th>Bedrag</th><th>WooCommerce</th></tr></thead><tbody>'+(rows||'<tr><td colspan="4">Nog geen kosten geregistreerd.</td></tr>')+'</tbody></table></div>'));
-});
-app.post("/admin/costs",requireAuth,requireAdmin,(req,res)=>{
- const name=String(req.body.name||"").trim(),amount=moneyInput(req.body.amount),date=String(req.body.expense_date||new Date().toISOString().slice(0,10)),productId=req.body.product_id?Number(req.body.product_id):null,notes=String(req.body.notes||"").slice(0,500);
- if(!name||!Number.isSafeInteger(amount)||amount<0||!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).send("Ongeldige kosten.");
- const r=db.prepare("INSERT INTO expenses (name,amount_cents,expense_date,product_id,notes) VALUES (?,?,?,?,?)").run(name,amount,date,productId,notes||null);res.redirect("/admin/costs");
-});
-app.post("/admin/costs/:id/sync",requireAuth,requireAdmin,async(req,res)=>{
- const expense=db.prepare("SELECT * FROM expenses WHERE id=?").get(Number(req.params.id));if(!expense)return res.status(404).send("Kosten niet gevonden.");
- if(expense.wc_order_id)return res.redirect("/admin/costs");
- try{const order=await woo.createExpenseOrder(expense);db.prepare("UPDATE expenses SET wc_order_id=? WHERE id=?").run(String(order.id),expense.id);res.redirect("/admin/costs");}catch(err){console.error("WooCommerce expense sync:",err.message);res.status(502).send("Kosten konden niet naar WooCommerce worden gestuurd. Controleer de API-instellingen.");}
-});
+app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>res.redirect("/admin/orders"));
 
 app.get("/health",(_req,res)=>res.json({ok:true}));
 app.use((err,req,res,next)=>{console.error(err);res.status(500).send("Er is iets misgegaan.");});
