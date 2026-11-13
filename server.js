@@ -148,84 +148,19 @@ function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrder
 
 
  
-// Inkomende WooCommerce order.created webhook
+// WooCommerce is alleen de externe orderadministratie voor Supply Panel-orders.
+// Inkomende WooCommerce-webhooks mogen nooit zelfstandig lokale SUPPLY-orders aanmaken.
 app.post("/webhooks/woocommerce", (req,res) => {
-  const secret = process.env.WC_WEBHOOK_SECRET;
-  const signature = req.get("x-wc-webhook-signature") || "";
-  const rawBody = req.rawBody;
-
-  // WooCommerce sends an unsigned form-urlencoded setup ping when a webhook is saved.
-  // It contains only webhook_id; acknowledge it without creating an order.
-  if (!signature && req.is("application/x-www-form-urlencoded") &&
-      req.body && Object.keys(req.body).length === 1 &&
-      /^\d+$/.test(String(req.body.webhook_id || ""))) {
-    console.info("WooCommerce webhook setup-ping bevestigd.", { webhookId: String(req.body.webhook_id) });
+  const topic = req.get("x-wc-webhook-topic") || "";
+  const isSetupPing = !topic && req.is("application/x-www-form-urlencoded") &&
+    req.body && Object.keys(req.body).length === 1 &&
+    /^\\d+$/.test(String(req.body.webhook_id || ""));
+  if (isSetupPing) {
+    console.info("WooCommerce webhook setup-ping bevestigd.");
     return res.status(200).json({ received: true, ping: true });
   }
-  // Veilige diagnose: log alleen headernamen en algemene requestmetadata, nooit headerwaarden of payload/secret.
-  console.info("WooCommerce webhook ontvangen:", {
-    method: req.method,
-    path: req.path,
-    contentType: req.get("content-type") || null,
-    contentLength: req.get("content-length") || null,
-    userAgent: req.get("user-agent") || null,
-    host: req.get("host") || null,
-    forwardedProto: req.get("x-forwarded-proto") || null,
-    headerNames: Object.keys(req.headers).sort(),
-    signaturePresent: !!signature,
-    rawBodyPresent: !!rawBody,
-    rawBodyLength: rawBody ? rawBody.length : 0,
-    bodyType: Array.isArray(req.body) ? "array" : typeof req.body,
-    bodyKeys: req.body && typeof req.body === "object" ? Object.keys(req.body).slice(0, 30) : []
-  });
-  if (!secret) {
-    console.error("WooCommerce webhook auth: WC_WEBHOOK_SECRET ontbreekt.");
-    return res.status(503).json({ error: "WC_WEBHOOK_SECRET is niet ingesteld." });
-  }
-  if (!signature || !rawBody) {
-    console.error("WooCommerce webhook auth: ontbrekende signature of raw body.", { signaturePresent: !!signature, rawBodyPresent: !!rawBody, contentType: req.get("content-type") || null });
-    return res.status(401).json({ error: "Webhook-handtekening of ruwe request-body ontbreekt." });
-  }
-  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("base64");
-  const a = Buffer.from(signature.trim()), b = Buffer.from(expected);
-  const validSignature = a.length === b.length && crypto.timingSafeEqual(a,b);
-  if (!validSignature) {
-    console.error("WooCommerce webhook auth: handtekening komt niet overeen.", { secretLength: Buffer.byteLength(secret), signatureLength: a.length, rawBodyLength: rawBody.length, contentType: req.get("content-type") || null });
-    return res.status(401).json({ error: "Ongeldige WooCommerce webhook-handtekening. Controleer WC_WEBHOOK_SECRET en herstart de applicatie." });
-  }
-  const order = req.body;
-  if (!order || !order.id) return res.status(400).json({ error: "Ongeldige WooCommerce order-payload." });
-  const topic = req.get("x-wc-webhook-topic") || "";
-  if (topic && topic !== "order.created") return res.status(200).json({ received: true, ignored: true, topic });
-  const wcOrderId = String(order.id);
-  const existing = db.prepare("SELECT id FROM orders WHERE wc_order_id=?").get(wcOrderId);
-  if (existing) return res.status(200).json({ received: true, duplicate: true, localOrderId: existing.id });
-  const email = String(order.billing?.email || "").trim().toLowerCase();
-  const wcCustomerId = Number(order.customer_id || 0);
-  const linked = wcCustomerId ? db.prepare("SELECT id FROM users WHERE wc_customer_id=? AND active=1").get(String(wcCustomerId)) : null;
-  const customer = linked || (email ? db.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE AND active=1").get(email) : null);
-  if (!customer) {
-    console.warn("WooCommerce webhook voor niet-gekoppelde klant:", email || "(geen e-mailadres)");
-    return res.status(200).json({ received: true, ignored: true, reason: "customer_not_linked" });
-  }
-  const lineItems = Array.isArray(order.line_items) ? order.line_items : [];
-  if (!lineItems.length) return res.status(200).json({ received: true, ignored: true, reason: "empty_order" });
-  const totalCents = Math.round(Number(order.total || 0) * 100);
-  const tx = db.transaction(() => {
-    const nextNo = db.prepare("SELECT COALESCE(MAX(local_order_no),0)+1 n FROM orders").get().n;
-    const result = db.prepare("INSERT INTO orders (user_id,status,total_cents,wc_order_id,wc_status,currency,notes,local_order_no) VALUES (?,?,?,?,?,?,?,?)")
-      .run(customer.id, "Nieuw", totalCents, wcOrderId, String(order.status || "pending"), String(order.currency || "EUR"), "Ontvangen via WooCommerce", nextNo);
-    const insert = db.prepare("INSERT INTO order_items (order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)");
-    for (const item of lineItems) {
-      const quantity = Math.max(1, Math.trunc(Number(item.quantity) || 1));
-      const unitPriceCents = Math.round((Number(item.total || 0) / quantity) * 100);
-      insert.run(result.lastInsertRowid, item.product_id ? String(item.product_id) : null, String(item.name || "WooCommerce product"), quantity, unitPriceCents);
-    }
-    return Number(result.lastInsertRowid);
-  });
-  const localOrderId = tx();
-  console.log(`WooCommerce order ${wcOrderId} ontvangen als lokale bestelling ${localOrderId}`);
-  return res.status(200).json({ received: true, localOrderId });
+  console.info("Inkomende WooCommerce-webhook genegeerd; Supply-orders worden uitsluitend vanuit het Supply Panel aangemaakt.", { topic: topic || "unknown" });
+  return res.status(200).json({ received: true, ignored: true, reason: "supply_orders_are_dashboard_only" });
 });
 
 app.get("/register",(req,res)=>res.redirect("/login"));
