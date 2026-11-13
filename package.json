@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "create-admin": "node scripts/create-admin.js"
+    "create-admin": "node scripts/create-admin.js",
+    "migrate:mysql": "node scripts/migrate-to-mysql.js"
   },
   "engines": {
     "node": ">=20"
