@@ -86,4 +86,5 @@ async function getInvoicePdf(wcOrderId){
  if(pdf.subarray(0,5).toString()!=="%PDF-")throw new Error("WP Overnight retourneerde geen geldige PDF");
  return pdf;
 }
-module.exports={request,listProducts,searchCustomers,getCustomer,createExpenseOrder,createWooOrder,updateWooOrder,createWooSubscription,refreshWooOrder,getInvoicePdf};
+async function getOrder(wcOrderId){return request(`orders/${encodeURIComponent(wcOrderId)}`);}
+module.exports={request,getOrder,listProducts,searchCustomers,getCustomer,createExpenseOrder,createWooOrder,updateWooOrder,createWooSubscription,refreshWooOrder,getInvoicePdf};
