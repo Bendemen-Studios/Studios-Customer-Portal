@@ -282,13 +282,22 @@ app.get("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=>
  const id=Number(req.params.id),sub=db.prepare("SELECT r.*,u.name customer_name FROM recurring_orders r JOIN users u ON u.id=r.user_id WHERE r.id=?").get(id);if(!sub)return res.status(404).send("Abonnement niet gevonden.");
  const products=db.prepare("SELECT id,name,price_cents FROM products WHERE active=1 ORDER BY name").all(),options=products.map(p=>'<option value="'+p.id+'">'+esc(p.name)+' — '+money(p.price_cents)+'</option>').join("");
  const lines=db.prepare("SELECT * FROM recurring_order_items WHERE recurring_order_id=?").all(id).map(x=>'<tr><td>'+esc(x.product_name)+'</td><td>'+x.quantity+'</td><td>'+money(x.unit_price_cents)+'</td></tr>').join("");
- res.send(page(req,"Abonnementproducten",'<div class="page-title"><h1>Producten koppelen</h1><p>'+esc(sub.name)+' · '+esc(sub.customer_name)+'</p></div><div class="panel"><form method="post" action="/admin/subscriptions/'+id+'/products" class="stack"><label>Product<select name="product_id" required>'+options+'</select></label><label>Aantal<input name="quantity" type="number" min="1" max="999" value="1" required></label><button class="primary">Product koppelen</button></form></div><div class="panel"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th></tr></thead><tbody>'+lines+'</tbody></table></div>'));
+ res.send(page(req,"Abonnementproducten",'<div class="page-title"><h1>Producten koppelen</h1><p>'+esc(sub.name)+' · '+esc(sub.customer_name)+'</p></div><div class="panel"><form method="post" action="/admin/subscriptions/'+id+'/sync"><button class="primary">Abonnement met alle producten naar WooCommerce sturen</button></form></div><div class="panel"><form method="post" action="/admin/subscriptions/'+id+'/products" class="stack"><label>Product<select name="product_id" required>'+options+'</select></label><label>Aantal<input name="quantity" type="number" min="1" max="999" value="1" required></label><button class="primary">Product koppelen</button></form></div><div class="panel"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th></tr></thead><tbody>'+lines+'</tbody></table></div>'));
 });
 app.post("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=>{
  const id=Number(req.params.id),sub=db.prepare("SELECT id FROM recurring_orders WHERE id=?").get(id),p=db.prepare("SELECT * FROM products WHERE id=? AND active=1").get(Number(req.body.product_id)),qty=Number(req.body.quantity);
  if(!sub||!p||!Number.isInteger(qty)||qty<1||qty>999)return res.status(400).send("Ongeldige invoer.");
  db.prepare("INSERT INTO recurring_order_items (recurring_order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)").run(id,p.wc_product_id||String(p.id),p.name,qty,p.price_cents);
  db.prepare("UPDATE recurring_orders SET amount_cents=(SELECT COALESCE(SUM(quantity*unit_price_cents),0) FROM recurring_order_items WHERE recurring_order_id=?) WHERE id=?").run(id,id);res.redirect("/admin/subscriptions/"+id+"/products");
+});
+app.post("/admin/subscriptions/:id/sync",requireAuth,requireAdmin,async(req,res)=>{
+ const id=Number(req.params.id),sub=db.prepare("SELECT r.*,u.name customer_name,u.email customer_email,u.wc_customer_id FROM recurring_orders r JOIN users u ON u.id=r.user_id WHERE r.id=?").get(id);
+ if(!sub)return res.status(404).send("Abonnement niet gevonden.");
+ if(sub.wc_subscription_id)return res.redirect("/admin/subscriptions");
+ const items=db.prepare("SELECT * FROM recurring_order_items WHERE recurring_order_id=?").all(id);
+ if(!items.length)return res.status(400).send("Voeg eerst minimaal één product toe aan dit abonnement.");
+ try{const result=await woo.createWooSubscription(sub,items);db.prepare("UPDATE recurring_orders SET wc_subscription_id=? WHERE id=?").run(String(result.id),id);res.redirect("/admin/subscriptions");}
+ catch(err){console.error("WooCommerce subscription sync:",err.message);res.status(502).send("Abonnement kon niet naar WooCommerce worden gestuurd. Controleer of WooCommerce Subscriptions actief is en de API-toegang heeft.");}
 });
 app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>res.redirect("/admin/orders"));
 
