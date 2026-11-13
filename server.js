@@ -51,7 +51,7 @@ function page(req, title, body) {
   const user = req.session.user;
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · Bendemen Studios</title><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="stylesheet" href="/style.css"></head><body>
   <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/costs">Maandkosten</a><a href="/subscriptions">Diensten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
-  <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Customer portal</span></footer></body></html>`;
+  <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Bendemen Supply Panel</span></footer></body></html>`;
 }
 function moneyInput(value) { return Math.round(Number(String(value).replace(",", ".")) * 100); }
 function orderItems(orderId) { return db.prepare("SELECT product_name,quantity,unit_price_cents FROM order_items WHERE order_id=?").all(orderId); }
@@ -113,7 +113,7 @@ app.get("/",requireAuth,(req,res)=>{
   const user=req.session.user,orders=getOrders(user.id,5);
   const monthly=db.prepare("SELECT COALESCE(SUM(amount_cents),0) total FROM monthly_costs WHERE user_id=? AND active=1").get(user.id).total;
   const orderSpend=db.prepare("SELECT COALESCE(SUM(total_cents),0) total FROM orders WHERE user_id=? AND strftime('%Y-%m',created_at)=strftime('%Y-%m','now')").get(user.id).total;
-  const body=`<div class="hero"><div><div class="eyebrow">CUSTOMER PORTAL</div><h1>Goedendag, ${esc(user.name.split(" ")[0])}.</h1><p>Alles rondom jouw 3D-printbestellingen op één plek.</p></div><a class="primary inline" href="/orders">Mijn bestellingen <span>→</span></a></div>
+  const body=`<div class="hero"><div><div class="eyebrow">BENDEMEN SUPPLY PANEL</div><h1>Goedendag, ${esc(user.name.split(" ")[0])}.</h1><p>Alles rondom jouw 3D-printbestellingen op één plek.</p></div><a class="primary inline" href="/orders">Mijn bestellingen <span>→</span></a></div>
   <div class="stats"><article class="stat"><span>Vaste maandkosten</span><strong>${money(monthly)}</strong><small>Actieve maandelijkse kosten</small></article><article class="stat"><span>Besteld deze maand</span><strong>${money(orderSpend)}</strong><small>Nieuwe orders deze maand</small></article><article class="stat"><span>Totaal bestellingen</span><strong>${db.prepare("SELECT COUNT(*) n FROM orders WHERE user_id=?").get(user.id).n}</strong><small>Alle geregistreerde orders</small></article></div>
   <section class="section-head"><div><div class="eyebrow">RECENT</div><h2>Recente bestellingen</h2></div><a class="textlink" href="/orders">Alle bestellingen →</a></section><div class="panel">${orders.length?orders.map(orderCard).join(""):'<div class="empty">Je hebt nog geen bestellingen.</div>'}</div>
   <div class="bottom-cta"><div><strong>Hetzelfde product nog een keer nodig?</strong><p>Bestel opnieuw vanuit je bestelgeschiedenis.</p></div><a class="secondary" href="/orders">Bekijk historie</a></div>`;
@@ -178,4 +178,4 @@ app.get("/admin/customers/:id",requireAuth,requireAdmin,(req,res)=>{
 
 app.get("/health",(_req,res)=>res.json({ok:true}));
 app.use((err,req,res,next)=>{console.error(err);res.status(500).send("Er is iets misgegaan.");});
-app.listen(PORT, "0.0.0.0", ()=>console.log(`Bendemen Customer Portal draait op poort ${PORT}`));
+app.listen(PORT, "0.0.0.0", ()=>console.log(`Bendemen Supply Panel draait op poort ${PORT}`));
