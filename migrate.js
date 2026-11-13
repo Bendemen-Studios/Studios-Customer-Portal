@@ -1,4 +1,4 @@
-require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 
 const Database = require("better-sqlite3");
 const mysql = require("mysql2/promise");
