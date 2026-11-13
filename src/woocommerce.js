@@ -32,7 +32,7 @@ async function createWooOrder(order,items){
   const total=(item.quantity*item.unit_price_cents/100).toFixed(2);
   const wcProductId=item.product_id&&/^\d+$/.test(String(item.product_id))?String(item.product_id):null;
   if(wcProductId){
-   line_items.push({product_id:Number(wcProductId),quantity:item.quantity});
+   line_items.push({product_id:Number(wcProductId),quantity:item.quantity,subtotal:total,total});
   }else{
    fee_lines.push({name:item.quantity>1?`${item.product_name} (aantal: ${item.quantity})`:item.product_name,tax_status:"none",total});
   }
@@ -47,6 +47,23 @@ async function createWooOrder(order,items){
   meta_data:[{key:"_bendemen_supply_panel_order",value:"1"},{key:"_bendemen_local_order_id",value:String(order.id)}]
  };
  return request("orders","POST",payload);
+}
+async function updateWooOrder(wcOrderId,items){
+ const existing=await request(`orders/${encodeURIComponent(wcOrderId)}`);
+ const line_items=[],fee_lines=[];
+ for(const item of items){
+  const total=(item.quantity*item.unit_price_cents/100).toFixed(2);
+  const wcProductId=item.product_id&&/^\\d+$/.test(String(item.product_id))?String(item.product_id):null;
+  if(wcProductId){
+   const match=(existing.line_items||[]).find(line=>String(line.product_id)===wcProductId);
+   line_items.push({...(match?{id:match.id}:{}),product_id:Number(wcProductId),quantity:item.quantity,subtotal:total,total});
+  }else{
+   const name=item.quantity>1?`${item.product_name} (aantal: ${item.quantity})`:item.product_name;
+   const match=(existing.fee_lines||[]).find(line=>line.name===name);
+   fee_lines.push({...(match?{id:match.id}:{}),name,tax_status:"none",total});
+  }
+ }
+ return request(`orders/${encodeURIComponent(wcOrderId)}`,"PUT",{line_items,fee_lines});
 }
 async function createWooSubscription(subscription,items){
  const line_items=[],fee_lines=[];
@@ -69,4 +86,4 @@ async function getInvoicePdf(wcOrderId){
  if(pdf.subarray(0,5).toString()!=="%PDF-")throw new Error("WP Overnight retourneerde geen geldige PDF");
  return pdf;
 }
-module.exports={request,listProducts,searchCustomers,getCustomer,createExpenseOrder,createWooOrder,createWooSubscription,refreshWooOrder,getInvoicePdf};
+module.exports={request,listProducts,searchCustomers,getCustomer,createExpenseOrder,createWooOrder,updateWooOrder,createWooSubscription,refreshWooOrder,getInvoicePdf};
