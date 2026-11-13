@@ -15,7 +15,28 @@ async function createExpenseOrder(expense){
  };
  return request("orders","POST",payload);
 }
-async function createWooOrder(localOrderId){throw new Error("WooCommerce order creation requires the configured local-order mapping service.");}
+async function createWooOrder(order,items){
+ const line_items=[],fee_lines=[];
+ for(const item of items){
+  const total=(item.quantity*item.unit_price_cents/100).toFixed(2);
+  const wcProductId=item.product_id&&/^\\d+$/.test(String(item.product_id))?String(item.product_id):null;
+  if(wcProductId){
+   line_items.push({product_id:Number(wcProductId),quantity:item.quantity});
+  }else{
+   fee_lines.push({name:item.quantity>1?`${item.product_name} (aantal: ${item.quantity})`:item.product_name,tax_status:"none",total});
+  }
+ }
+ const payload={
+  status:"pending",
+  set_paid:false,
+  customer_id:order.wc_customer_id?Number(order.wc_customer_id):0,
+  billing:{email:order.customer_email,first_name:order.customer_name},
+  line_items,
+  fee_lines,
+  meta_data:[{key:"_bendemen_supply_panel_order",value:"1"},{key:"_bendemen_local_order_id",value:String(order.id)}]
+ };
+ return request("orders","POST",payload);
+}
 async function refreshWooOrder(localOrderId){return null;}
 async function getInvoice(wcOrderId){return request(`orders/${encodeURIComponent(wcOrderId)}?context=view`);}
 module.exports={request,listProducts,searchCustomers,getCustomer,createExpenseOrder,createWooOrder,refreshWooOrder,getInvoice};
