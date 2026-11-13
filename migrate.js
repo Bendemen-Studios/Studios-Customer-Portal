@@ -42,8 +42,9 @@ function safeDefault(value, column) {
 }
 
 function digestRows(rows, columns) {
-  const hash = crypto.createHash("sha256");
-  for (const row of rows) {
+  // SQLite en MySQL kunnen rijen in een andere volgorde teruggeven.
+  // Sorteer daarom de genormaliseerde rijen vóór de checksum.
+  const normalizedRows = rows.map(row => {
     const values = columns.map(column => {
       const value = row[column.name];
       if (Buffer.isBuffer(value)) return { buffer: value.toString("base64") };
@@ -54,8 +55,10 @@ function digestRows(rows, columns) {
       }
       return value;
     });
-    hash.update(JSON.stringify(values) + "\n");
-  }
+    return JSON.stringify(values);
+  }).sort();
+  const hash = crypto.createHash("sha256");
+  for (const row of normalizedRows) hash.update(row + "\\n");
   return hash.digest("hex");
 }
 
