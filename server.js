@@ -253,7 +253,7 @@ app.get("/orders/:id",requireAuth,async(req,res)=>{
   const canCancel=fresh.workflow_status==="started"&&!["processing","completed","cancelled","refunded"].includes(fresh.wc_status);
   const payBlock=fresh.payment_url&&!["processing","completed","refunded","cancelled"].includes(fresh.wc_status)?`<div class="payment-box"><div><strong>Deze bestelling staat nog open</strong><p>Betaal veilig via de betaalpagina van Bendemen Studios.</p></div><a class="primary" href="/orders/${id}/pay">Nu betalen <span>→</span></a></div>`:(fresh.wc_status?`<p class="hint">WooCommerce-status: ${esc(displayOrderStatus(fresh))}</p>`:'<p class="hint">De WooCommerce-betaallink verschijnt zodra de winkelkoppeling is ingesteld.</p>');
   const cancelBlock=canCancel?`<form method="post" action="/orders/${id}/cancel" class="cancel-box"><div><strong>Bestelling annuleren</strong><p>Dit kan zolang de bestelling nog niet in behandeling is genomen.</p></div><button class="danger">Bestelling annuleren</button></form>`:"";
-  const invoiceBlock=fresh.wc_order_id&&["processing","completed","refunded"].includes(fresh.wc_status)?`<p class="invoice-action"><a class="secondary" href="/orders/${id}/invoice" target="_blank" rel="noopener">Factuur downloaden (PDF) →</a></p>`:"";
+  const invoiceBlock=fresh.wc_order_id&&["pending","on-hold","processing","completed","refunded"].includes(fresh.wc_status)?`<p class="invoice-action"><a class="secondary" href="/orders/${id}/invoice" target="_blank" rel="noopener">Factuur downloaden (PDF) →</a></p>`:"";
   res.send(page(req,"Bestelling",`<a class="back" href="/orders">← Terug naar bestellingen</a><div class="page-title"><div class="eyebrow">BESTELLING BDS-${String(id).padStart(6,"0")}${fresh.wc_order_id?` · WC #${fresh.wc_order_id}`:""}</div><h1>Bestelling bekijken</h1><p>Aangemaakt op ${esc(o.created_at)} · <span class="status">${esc(displayOrderStatus(fresh))}</span></p></div>${payBlock}${cancelBlock}${invoiceBlock}<div class="panel"><div class="table-wrap"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th><th>Totaal</th></tr></thead><tbody>${rows}</tbody></table></div><div class="total-line"><span>Ordertotaal</span><strong>${money(o.total_cents)}</strong></div></div>${fresh.allow_reorder!==0?`<form method="post" action="/orders/${id}/reorder" class="reorder-form"><div><strong>Dit product opnieuw bestellen?</strong><p>We maken direct een nieuwe order aan met dezelfde producten en aantallen.</p></div><button class="primary">Opnieuw bestellen <span>→</span></button></form>`:`<p class="hint">Dit is een maatwerkbestelling. Opnieuw bestellen is voor deze bestelling uitgeschakeld.</p>`}`));
 });
 app.get("/orders/:id/pay",requireAuth,(req,res)=>{
@@ -265,8 +265,17 @@ app.get("/orders/:id/pay",requireAuth,(req,res)=>{
 app.get("/orders/:id/invoice",requireAuth,async(req,res)=>{
   const id=Number(req.params.id),order=db.prepare("SELECT * FROM orders WHERE id=? AND user_id=?").get(id,req.session.user.id);
   if(!order||!order.wc_order_id)return res.status(404).send("Factuur niet gevonden.");
-  if(!["processing","completed","refunded"].includes(order.wc_status))return res.status(409).send("De factuur is nog niet beschikbaar.");
-  try{const invoice=await woo.getInvoice(order.wc_order_id);if(!invoice?.invoice_url)return res.status(404).send("WP Overnight heeft nog geen PDF-factuur beschikbaar.");res.redirect(invoice.invoice_url);}catch(err){console.error(err);res.status(502).send("Factuur kon niet worden opgehaald.");}
+  if(!["pending","on-hold","processing","completed","refunded"].includes(order.wc_status))return res.status(409).send("Voor deze bestelling is nog geen factuur beschikbaar.");
+  try{
+    const pdf=await woo.getInvoicePdf(order.wc_order_id);
+    res.setHeader("Content-Type","application/pdf");
+    res.setHeader("Content-Disposition",`inline; filename="factuur-BDS-${String(id).padStart(6,"0")}.pdf"`);
+    res.setHeader("Cache-Control","private, no-store");
+    res.send(pdf);
+  }catch(err){
+    console.error("WP Overnight invoice retrieval failed:",err.message);
+    res.status(err.response?.status===404?404:502).send("De WP Overnight-factuur is nog niet beschikbaar. Controleer of de factuur in WooCommerce is aangemaakt.");
+  }
 });
 app.post("/orders/:id/reorder",requireAuth,async(req,res)=>{
   const id=Number(req.params.id),order=db.prepare("SELECT * FROM orders WHERE id=? AND user_id=?").get(id,req.session.user.id);
