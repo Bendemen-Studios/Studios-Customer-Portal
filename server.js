@@ -118,6 +118,15 @@ app.post("/webhooks/woocommerce", (req,res) => {
   const secret = process.env.WC_WEBHOOK_SECRET;
   const signature = req.get("x-wc-webhook-signature") || "";
   const rawBody = req.rawBody;
+
+  // WooCommerce sends an unsigned form-urlencoded setup ping when a webhook is saved.
+  // It contains only webhook_id; acknowledge it without creating an order.
+  if (!signature && req.is("application/x-www-form-urlencoded") &&
+      req.body && Object.keys(req.body).length === 1 &&
+      /^\\d+$/.test(String(req.body.webhook_id || ""))) {
+    console.info("WooCommerce webhook setup-ping bevestigd.", { webhookId: String(req.body.webhook_id) });
+    return res.status(200).json({ received: true, ping: true });
+  }
   // Veilige diagnose: log alleen headernamen en algemene requestmetadata, nooit headerwaarden of payload/secret.
   console.info("WooCommerce webhook ontvangen:", {
     method: req.method,
