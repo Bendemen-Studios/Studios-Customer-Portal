@@ -117,10 +117,22 @@ function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrder
 app.post("/webhooks/woocommerce", (req,res) => {
   const secret = process.env.WC_WEBHOOK_SECRET;
   const signature = req.get("x-wc-webhook-signature") || "";
-  if (!secret) return res.status(503).json({ error: "WC_WEBHOOK_SECRET is niet ingesteld." });
-  const expected = crypto.createHmac("sha256", secret).update(req.rawBody || Buffer.from("")).digest("base64");
-  const a = Buffer.from(signature), b = Buffer.from(expected);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a,b)) return res.status(401).json({ error: "Ongeldige WooCommerce webhook-handtekening." });
+  const rawBody = req.rawBody;
+  if (!secret) {
+    console.error("WooCommerce webhook auth: WC_WEBHOOK_SECRET ontbreekt.");
+    return res.status(503).json({ error: "WC_WEBHOOK_SECRET is niet ingesteld." });
+  }
+  if (!signature || !rawBody) {
+    console.error("WooCommerce webhook auth: ontbrekende signature of raw body.", { signaturePresent: !!signature, rawBodyPresent: !!rawBody, contentType: req.get("content-type") || null });
+    return res.status(401).json({ error: "Webhook-handtekening of ruwe request-body ontbreekt." });
+  }
+  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("base64");
+  const a = Buffer.from(signature.trim()), b = Buffer.from(expected);
+  const validSignature = a.length === b.length && crypto.timingSafeEqual(a,b);
+  if (!validSignature) {
+    console.error("WooCommerce webhook auth: handtekening komt niet overeen.", { secretLength: Buffer.byteLength(secret), signatureLength: a.length, rawBodyLength: rawBody.length, contentType: req.get("content-type") || null });
+    return res.status(401).json({ error: "Ongeldige WooCommerce webhook-handtekening. Controleer WC_WEBHOOK_SECRET en herstart de applicatie." });
+  }
   const order = req.body;
   if (!order || !order.id) return res.status(400).json({ error: "Ongeldige WooCommerce order-payload." });
   const topic = req.get("x-wc-webhook-topic") || "";
