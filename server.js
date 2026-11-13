@@ -50,7 +50,7 @@ const money = euro;
 function page(req, title, body) {
   const user = req.session.user;
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · Bendemen Studios</title><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="stylesheet" href="/style.css"></head><body>
-  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/costs">Maandkosten</a><a href="/subscriptions">Diensten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
+  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/costs">Maandkosten</a><a href="/subscriptions">Diensten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a><a href="/admin/costs">Kosten</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a><a class="mutedlink" href="/register">Account aanmaken</a>'}</header>
   <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Bendemen Supply Panel</span></footer></body></html>`;
 }
 function moneyInput(value) { return Math.round(Number(String(value).replace(",", ".")) * 100); }
@@ -94,6 +94,21 @@ function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrder
   });
   return tx();
 }
+
+
+app.get("/register",(req,res)=>{
+ if(req.session.user)return res.redirect("/");
+ res.send(page(req,"Account aanmaken",'<section class="auth-card"><div class="eyebrow">BENDEMEN STUDIOS</div><h1>Maak je account.</h1><p class="sub">Registreer om je bestellingen en diensten te bekijken.</p><form method="post" action="/register" class="stack"><label>Naam<input name="name" maxlength="120" required></label><label>E-mailadres<input name="email" type="email" maxlength="190" required></label><label>Wachtwoord<input name="password" type="password" minlength="12" autocomplete="new-password" required><small>Minimaal 12 tekens.</small></label><button class="primary">Account aanmaken <span>→</span></button></form><p class="hint">Heb je al een account? <a href="/login">Inloggen</a></p></section>'));
+});
+app.post("/register",loginLimiter,async(req,res)=>{
+ const name=String(req.body.name||"").trim(),email=String(req.body.email||"").trim().toLowerCase(),password=String(req.body.password||"");
+ if(name.length<2||name.length>120||!/^\S+@\S+\.\S+$/.test(email)||password.length<12||password.length>200)return res.status(400).send(page(req,"Account aanmaken",'<div class="alert">Controleer je gegevens. Het wachtwoord moet minimaal 12 tekens bevatten.</div><a href="/register">Opnieuw proberen</a>'));
+ try{
+  const hash=await bcrypt.hash(password,12);
+  const result=db.prepare("INSERT INTO users (name,email,password_hash,role,active) VALUES (?,?,?,'customer',1)").run(name,email,hash);
+  req.session.regenerate(err=>{if(err)return res.status(500).send("Account aangemaakt, maar inloggen is niet gelukt. Ga naar inloggen.");req.session.user={id:Number(result.lastInsertRowid),name,email,role:"customer"};res.redirect("/");});
+ }catch(err){if(String(err.message).includes("UNIQUE"))return res.status(409).send(page(req,"Account bestaat al",'<div class="alert">Er bestaat al een account met dit e-mailadres. <a href="/login">Log in</a>.</div>'));console.error(err);res.status(500).send("Account aanmaken is mislukt.");}
+});
 
 app.get("/login",(req,res)=>{
   if(req.session.user)return res.redirect("/");
@@ -160,7 +175,7 @@ app.post("/orders/:id/cancel",requireAuth,(req,res)=>{
 
 app.get("/admin",requireAuth,requireAdmin,(req,res)=>{
   const customers=db.prepare("SELECT id,name,email,active,created_at FROM users WHERE role='customer' ORDER BY name").all();
-  const body=`<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Beheer klanttoegang en bekijk de klantenlijst.</p></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>${customers.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.email)}</td><td>${c.active?"Actief":"Uitgeschakeld"}</td><td><form method="post" action="/admin/customers/${c.id}/access"><button class="secondary">${c.active?"Uitschakelen":"Activeren"}</button></form></td></tr>`).join("")}</tbody></table></div>`;
+  const body=`<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Beheer klanttoegang en bekijk de klantenlijst.</p></div><div class="panel"><h2>Klant toevoegen</h2><form method="post" action="/admin/customers" class="stack"><label>Naam<input name="name" required maxlength="120"></label><label>E-mailadres<input name="email" type="email" required maxlength="190"></label><label>Tijdelijk wachtwoord<input name="password" type="password" minlength="12" required></label><button class="primary">Klant aanmaken</button></form></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>${customers.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.email)}</td><td>${c.active?"Actief":"Uitgeschakeld"}</td><td><a href="/admin/customers/${c.id}">Bekijken</a> · <form method="post" action="/admin/customers/${c.id}/access"><button class="secondary">${c.active?"Uitschakelen":"Activeren"}</button></form></td></tr>`).join("")}</tbody></table></div>`;
   res.send(page(req,"Beheer",body));
 });
 app.post("/admin/customers/:id/access",requireAuth,requireAdmin,(req,res)=>{
@@ -174,6 +189,93 @@ app.get("/admin/customers/:id",requireAuth,requireAdmin,(req,res)=>{
   if(!customer)return res.status(404).send("Klant niet gevonden.");
   const orders=getOrders(id);
   res.send(page(req,"Klant",`<h1>${esc(customer.name)}</h1><p>${esc(customer.email)}</p><div class="panel">${orders.map(orderCard).join("")}</div>`));
+});
+
+
+app.get("/costs",requireAuth,(req,res)=>{
+ const costs=db.prepare("SELECT * FROM monthly_costs WHERE user_id=? ORDER BY active DESC,id DESC").all(req.session.user.id);
+ const rows=costs.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+esc(c.interval)+'</td><td>'+money(c.amount_cents)+'</td><td>'+(c.active?'Actief':'Gestopt')+'</td></tr>').join("");
+ res.send(page(req,"Maandkosten",'<div class="page-title"><div class="eyebrow">OVERZICHT</div><h1>Maandkosten</h1><p>Terugkerende kosten die aan je account zijn gekoppeld.</p></div><div class="panel"><div class="table-wrap"><table><thead><tr><th>Omschrijving</th><th>Periode</th><th>Bedrag</th><th>Status</th></tr></thead><tbody>'+ (rows||'<tr><td colspan="4">Er zijn nog geen maandkosten gekoppeld.</td></tr>') +'</tbody></table></div></div>'));
+});
+app.get("/subscriptions",requireAuth,(req,res)=>{
+ const subs=db.prepare("SELECT * FROM recurring_orders WHERE user_id=? ORDER BY id DESC").all(req.session.user.id);
+ const cards=subs.map(sub=>{const items=db.prepare("SELECT product_name,quantity,unit_price_cents FROM recurring_order_items WHERE recurring_order_id=?").all(sub.id);return '<div class="order-row"><div><strong>'+esc(sub.name)+'</strong><small>'+esc(sub.interval)+' · '+esc(sub.status)+'</small></div><div class="order-products">'+esc(items.map(x=>x.quantity+'× '+x.product_name).join(', ')||'Geen producten gekoppeld')+'</div><strong>'+money(sub.amount_cents)+'</strong><div>'+(sub.next_payment?'Volgende betaling: '+esc(sub.next_payment):'')+'</div></div>';}).join("");
+ res.send(page(req,"Diensten",'<div class="page-title"><div class="eyebrow">JOUW DIENSTEN</div><h1>Abonnementen & diensten</h1><p>Bekijk je actieve diensten en gekoppelde producten.</p></div><div class="panel">'+(cards||'<div class="empty">Er zijn nog geen diensten aan je account gekoppeld.</div>')+'</div>'));
+});
+app.get("/admin/products",requireAuth,requireAdmin,(req,res)=>{
+ const products=db.prepare("SELECT * FROM products ORDER BY active DESC,name").all();
+ const rows=products.map(p=>'<tr><td>'+esc(p.name)+'</td><td>'+esc(p.sku||'—')+'</td><td>'+money(p.price_cents)+'</td><td>'+esc(p.source)+'</td><td>'+(p.wc_product_id?'Woo #'+esc(p.wc_product_id):'Handmatig')+'</td></tr>').join("");
+ res.send(page(req,"Productbeheer",'<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Producten</h1><p>Importeer WooCommerce-producten of voeg ze handmatig toe.</p></div><div class="panel"><h2>WooCommerce synchroniseren</h2><form method="post" action="/admin/products/sync"><button class="primary">Producten ophalen uit WooCommerce</button></form></div><div class="panel"><h2>Handmatig product toevoegen</h2><form method="post" action="/admin/products" class="stack"><label>Productnaam<input name="name" maxlength="180" required></label><label>SKU<input name="sku" maxlength="100"></label><label>Prijs in euro<input name="price" inputmode="decimal" placeholder="0,00" required></label><label>Product-URL<input name="product_url" type="url"></label><button class="primary">Product opslaan</button></form></div><div class="panel"><h2>Productcatalogus</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th>Prijs</th><th>Bron</th><th>Koppeling</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen producten. Synchroniseer WooCommerce of voeg handmatig toe.</td></tr>')+'</tbody></table></div></div>'));
+});
+app.post("/admin/products",requireAuth,requireAdmin,(req,res)=>{
+ const name=String(req.body.name||"").trim(),sku=String(req.body.sku||"").trim(),price=moneyInput(req.body.price),url=String(req.body.product_url||"").trim();
+ if(!name||!Number.isSafeInteger(price)||price<0||url&&!/^https?:\/\//i.test(url))return res.status(400).send("Ongeldig product of bedrag.");
+ db.prepare("INSERT INTO products (name,sku,price_cents,product_url,source) VALUES (?,?,?,?,'manual')").run(name,sku||null,price,url||null);res.redirect("/admin/products");
+});
+app.post("/admin/products/sync",requireAuth,requireAdmin,async(req,res)=>{
+ try{
+  let pageNo=1,count=0;
+  while(pageNo<=10){const list=await woo.listProducts(pageNo,100);if(!list.length)break;
+   const upsert=db.prepare("INSERT INTO products (wc_product_id,name,sku,description,price_cents,product_url,image_url,source,active,updated_at) VALUES (?,?,?,?,?,?,?,'woocommerce',1,CURRENT_TIMESTAMP) ON CONFLICT(wc_product_id) DO UPDATE SET name=excluded.name,sku=excluded.sku,description=excluded.description,price_cents=excluded.price_cents,product_url=excluded.product_url,image_url=excluded.image_url,active=1,updated_at=CURRENT_TIMESTAMP");
+   const tx=db.transaction(items=>{for(const p of items){const cents=Math.round(Number(p.price||0)*100);upsert.run(String(p.id),p.name||'Product',p.sku||null,p.description||null,cents,p.permalink||null,p.images&&p.images[0]?p.images[0].src:null);}});
+   tx(list);count+=list.length;if(list.length<100)break;pageNo++;
+  }
+  res.redirect("/admin/products?sync="+count);
+ }catch(err){console.error("WooCommerce product sync:",err.message);res.status(502).send("WooCommerce synchroniseren is mislukt. Controleer WC_STORE_URL, WC_CONSUMER_KEY en WC_CONSUMER_SECRET in .env.");}
+});
+app.get("/admin/orders/:id/products",requireAuth,requireAdmin,(req,res)=>{
+ const id=Number(req.params.id),order=db.prepare("SELECT o.*,u.name customer_name FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=?").get(id);if(!order)return res.status(404).send("Bestelling niet gevonden.");
+ const products=db.prepare("SELECT id,name,price_cents FROM products WHERE active=1 ORDER BY name").all(),items=db.prepare("SELECT * FROM order_items WHERE order_id=?").all(id);
+ const options=products.map(p=>'<option value="'+p.id+'">'+esc(p.name)+' — '+money(p.price_cents)+'</option>').join("");
+ const lines=items.map(x=>'<tr><td>'+esc(x.product_name)+'</td><td>'+x.quantity+'</td><td>'+money(x.unit_price_cents)+'</td></tr>').join("");
+ res.send(page(req,"Producten koppelen",'<a class="back" href="/admin">← Beheer</a><div class="page-title"><h1>Producten koppelen aan BDS-'+String(id).padStart(6,'0')+'</h1><p>Klant: '+esc(order.customer_name)+'</p></div><div class="panel"><form method="post" action="/admin/orders/'+id+'/products" class="stack"><label>Product<select name="product_id" required>'+options+'</select></label><label>Aantal<input name="quantity" type="number" min="1" max="999" value="1" required></label><button class="primary">Product toevoegen aan bestelling</button></form></div><div class="panel"><h2>Huidige orderregels</h2><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th></tr></thead><tbody>'+lines+'</tbody></table></div>'));
+});
+app.post("/admin/orders/:id/products",requireAuth,requireAdmin,(req,res)=>{
+ const id=Number(req.params.id),product=db.prepare("SELECT * FROM products WHERE id=? AND active=1").get(Number(req.body.product_id)),qty=Number(req.body.quantity);
+ const order=db.prepare("SELECT id FROM orders WHERE id=?").get(id);if(!order||!product||!Number.isInteger(qty)||qty<1||qty>999)return res.status(400).send("Ongeldige bestelling, productkeuze of aantal.");
+ db.prepare("INSERT INTO order_items (order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)").run(id,product.wc_product_id||String(product.id),product.name,qty,product.price_cents);
+ db.prepare("UPDATE orders SET total_cents=(SELECT COALESCE(SUM(quantity*unit_price_cents),0) FROM order_items WHERE order_id=?) WHERE id=?").run(id,id);
+ res.redirect("/admin/orders/"+id+"/products");
+});
+app.get("/admin/subscriptions",requireAuth,requireAdmin,(req,res)=>{
+ const subs=db.prepare("SELECT r.*,u.name customer_name FROM recurring_orders r JOIN users u ON u.id=r.user_id ORDER BY r.id DESC").all();
+ const customers=db.prepare("SELECT id,name FROM users WHERE role='customer' AND active=1 ORDER BY name").all();
+ const products=db.prepare("SELECT id,name,price_cents FROM products WHERE active=1 ORDER BY name").all();
+ const options=customers.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join("");
+ const rows=subs.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.customer_name)+'</td><td>'+esc(x.status)+'</td><td>'+money(x.amount_cents)+'</td><td><a href="/admin/subscriptions/'+x.id+'/products">Producten koppelen</a></td></tr>').join("");
+ res.send(page(req,"Abonnementen beheren",'<div class="page-title"><h1>Abonnementen</h1><p>Maak een dienst aan voor een bestaande klant.</p></div><div class="panel"><form method="post" action="/admin/subscriptions" class="stack"><label>Klant<select name="user_id" required>'+options+'</select></label><label>Naam dienst<input name="name" maxlength="180" required></label><label>Bedrag per periode<input name="amount" inputmode="decimal" required placeholder="0,00"></label><label>Periode<select name="interval"><option value="month">Maand</option><option value="year">Jaar</option><option value="week">Week</option></select></label><label>Volgende betaling<input name="next_payment" type="date"></label><button class="primary">Abonnement aanmaken</button></form></div><div class="panel"><table><thead><tr><th>Dienst</th><th>Klant</th><th>Status</th><th>Bedrag</th><th></th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen abonnementen.</td></tr>')+'</tbody></table></div>'));
+});
+app.post("/admin/subscriptions",requireAuth,requireAdmin,(req,res)=>{
+ const user=db.prepare("SELECT id FROM users WHERE id=? AND role='customer'").get(Number(req.body.user_id)),name=String(req.body.name||"").trim(),amount=moneyInput(req.body.amount),interval=["week","month","year"].includes(req.body.interval)?req.body.interval:"month",next=String(req.body.next_payment||"");
+ if(!user||!name||!Number.isSafeInteger(amount)||amount<0||next&&!/^\d{4}-\d{2}-\d{2}$/.test(next))return res.status(400).send("Controleer de abonnementsgegevens.");
+ db.prepare("INSERT INTO recurring_orders (user_id,name,amount_cents,interval,next_payment) VALUES (?,?,?,?,?)").run(user.id,name,amount,interval,next||null);res.redirect("/admin/subscriptions");
+});
+app.get("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=>{
+ const id=Number(req.params.id),sub=db.prepare("SELECT r.*,u.name customer_name FROM recurring_orders r JOIN users u ON u.id=r.user_id WHERE r.id=?").get(id);if(!sub)return res.status(404).send("Abonnement niet gevonden.");
+ const products=db.prepare("SELECT id,name,price_cents FROM products WHERE active=1 ORDER BY name").all(),options=products.map(p=>'<option value="'+p.id+'">'+esc(p.name)+' — '+money(p.price_cents)+'</option>').join("");
+ const lines=db.prepare("SELECT * FROM recurring_order_items WHERE recurring_order_id=?").all(id).map(x=>'<tr><td>'+esc(x.product_name)+'</td><td>'+x.quantity+'</td><td>'+money(x.unit_price_cents)+'</td></tr>').join("");
+ res.send(page(req,"Abonnementproducten",'<div class="page-title"><h1>Producten koppelen</h1><p>'+esc(sub.name)+' · '+esc(sub.customer_name)+'</p></div><div class="panel"><form method="post" action="/admin/subscriptions/'+id+'/products" class="stack"><label>Product<select name="product_id" required>'+options+'</select></label><label>Aantal<input name="quantity" type="number" min="1" max="999" value="1" required></label><button class="primary">Product koppelen</button></form></div><div class="panel"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th></tr></thead><tbody>'+lines+'</tbody></table></div>'));
+});
+app.post("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=>{
+ const id=Number(req.params.id),sub=db.prepare("SELECT id FROM recurring_orders WHERE id=?").get(id),p=db.prepare("SELECT * FROM products WHERE id=? AND active=1").get(Number(req.body.product_id)),qty=Number(req.body.quantity);
+ if(!sub||!p||!Number.isInteger(qty)||qty<1||qty>999)return res.status(400).send("Ongeldige invoer.");
+ db.prepare("INSERT INTO recurring_order_items (recurring_order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)").run(id,p.wc_product_id||String(p.id),p.name,qty,p.price_cents);
+ db.prepare("UPDATE recurring_orders SET amount_cents=(SELECT COALESCE(SUM(quantity*unit_price_cents),0) FROM recurring_order_items WHERE recurring_order_id=?) WHERE id=?").run(id,id);res.redirect("/admin/subscriptions/"+id+"/products");
+});
+app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>{
+ const costs=db.prepare("SELECT * FROM expenses ORDER BY expense_date DESC,id DESC").all(),rows=costs.map(x=>'<tr><td>'+esc(x.expense_date)+'</td><td>'+esc(x.name)+'</td><td>'+money(x.amount_cents)+'</td><td>'+(x.wc_order_id?'WooCommerce #'+esc(x.wc_order_id):'Niet gesynchroniseerd')+'</td></tr>').join("");
+ const products=db.prepare("SELECT id,name FROM products WHERE active=1 ORDER BY name").all(),options=products.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join("");
+ res.send(page(req,"Kostenbeheer",'<div class="page-title"><h1>Kostenbeheer</h1><p>Registreer inkoop- en productkosten. Je kunt ze daarna als gemarkeerde kostenorder naar WooCommerce sturen.</p></div><div class="panel"><form method="post" action="/admin/costs" class="stack"><label>Omschrijving<input name="name" required maxlength="180"></label><label>Bedrag in euro<input name="amount" inputmode="decimal" required placeholder="0,00"></label><label>Datum<input name="expense_date" type="date"></label><label>Product (optioneel)<select name="product_id"><option value="">Geen product</option>'+options+'</select></label><label>Notitie<input name="notes" maxlength="500"></label><button class="primary">Kosten opslaan</button></form></div><div class="panel"><table><thead><tr><th>Datum</th><th>Omschrijving</th><th>Bedrag</th><th>WooCommerce</th></tr></thead><tbody>'+(rows||'<tr><td colspan="4">Nog geen kosten geregistreerd.</td></tr>')+'</tbody></table></div>'));
+});
+app.post("/admin/costs",requireAuth,requireAdmin,(req,res)=>{
+ const name=String(req.body.name||"").trim(),amount=moneyInput(req.body.amount),date=String(req.body.expense_date||new Date().toISOString().slice(0,10)),productId=req.body.product_id?Number(req.body.product_id):null,notes=String(req.body.notes||"").slice(0,500);
+ if(!name||!Number.isSafeInteger(amount)||amount<0||!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).send("Ongeldige kosten.");
+ const r=db.prepare("INSERT INTO expenses (name,amount_cents,expense_date,product_id,notes) VALUES (?,?,?,?,?)").run(name,amount,date,productId,notes||null);res.redirect("/admin/costs");
+});
+app.post("/admin/costs/:id/sync",requireAuth,requireAdmin,async(req,res)=>{
+ const expense=db.prepare("SELECT * FROM expenses WHERE id=?").get(Number(req.params.id));if(!expense)return res.status(404).send("Kosten niet gevonden.");
+ if(expense.wc_order_id)return res.redirect("/admin/costs");
+ try{const order=await woo.createExpenseOrder(expense);db.prepare("UPDATE expenses SET wc_order_id=? WHERE id=?").run(String(order.id),expense.id);res.redirect("/admin/costs");}catch(err){console.error("WooCommerce expense sync:",err.message);res.status(502).send("Kosten konden niet naar WooCommerce worden gestuurd. Controleer de API-instellingen.");}
 });
 
 app.get("/health",(_req,res)=>res.json({ok:true}));
