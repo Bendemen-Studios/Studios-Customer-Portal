@@ -37,6 +37,17 @@ async function createWooOrder(order,items){
  };
  return request("orders","POST",payload);
 }
+async function createWooSubscription(subscription,items){
+ const line_items=[],fee_lines=[];
+ for(const item of items){
+  const wcProductId=item.product_id&&/^\\d+$/.test(String(item.product_id))?String(item.product_id):null;
+  if(wcProductId)line_items.push({product_id:Number(wcProductId),quantity:item.quantity});
+  else fee_lines.push({name:item.quantity>1?`${item.product_name} (aantal: ${item.quantity})`:item.product_name,tax_status:"none",total:(item.quantity*item.unit_price_cents/100).toFixed(2)});
+ }
+ if(!line_items.length&&!fee_lines.length)throw new Error("Abonnement bevat geen regels.");
+ const payload={status:"pending",customer_id:subscription.wc_customer_id?Number(subscription.wc_customer_id):0,billing:{email:subscription.customer_email,first_name:subscription.customer_name},billing_period:subscription.interval==="year"?"year":subscription.interval==="week"?"week":"month",billing_interval:1,start_date:subscription.next_payment||new Date().toISOString().slice(0,10),line_items,fee_lines,meta_data:[{key:"_bendemen_supply_panel_subscription",value:"1"},{key:"_bendemen_local_subscription_id",value:String(subscription.id)}]};
+ return request("subscriptions","POST",payload);
+}
 async function refreshWooOrder(localOrderId){return null;}
 async function getInvoice(wcOrderId){return request(`orders/${encodeURIComponent(wcOrderId)}?context=view`);}
 module.exports={request,listProducts,searchCustomers,getCustomer,createExpenseOrder,createWooOrder,refreshWooOrder,getInvoice};
