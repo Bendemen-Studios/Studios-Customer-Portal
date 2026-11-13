@@ -50,7 +50,7 @@ const money = euro;
 function page(req, title, body) {
   const user = req.session.user;
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · Bendemen Studios</title><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="stylesheet" href="/style.css"></head><body>
-  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/costs">Maandkosten</a><a href="/subscriptions">Diensten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a><a href="/admin/costs">Kosten</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a><a class="mutedlink" href="/register">Account aanmaken</a>'}</header>
+  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/costs">Maandkosten</a><a href="/subscriptions">Diensten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a><a href="/admin/costs">Kosten</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
   <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Bendemen Supply Panel</span></footer></body></html>`;
 }
 function moneyInput(value) { return Math.round(Number(String(value).replace(",", ".")) * 100); }
@@ -96,19 +96,8 @@ function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrder
 }
 
 
-app.get("/register",(req,res)=>{
- if(req.session.user)return res.redirect("/");
- res.send(page(req,"Account aanmaken",'<section class="auth-card"><div class="eyebrow">BENDEMEN STUDIOS</div><h1>Maak je account.</h1><p class="sub">Registreer om je bestellingen en diensten te bekijken.</p><form method="post" action="/register" class="stack"><label>Naam<input name="name" maxlength="120" required></label><label>E-mailadres<input name="email" type="email" maxlength="190" required></label><label>Wachtwoord<input name="password" type="password" minlength="12" autocomplete="new-password" required><small>Minimaal 12 tekens.</small></label><button class="primary">Account aanmaken <span>→</span></button></form><p class="hint">Heb je al een account? <a href="/login">Inloggen</a></p></section>'));
-});
-app.post("/register",loginLimiter,async(req,res)=>{
- const name=String(req.body.name||"").trim(),email=String(req.body.email||"").trim().toLowerCase(),password=String(req.body.password||"");
- if(name.length<2||name.length>120||email.indexOf("@")<1||email.lastIndexOf(".")<email.indexOf("@")+2||password.length<12||password.length>200)return res.status(400).send("Ongeldige klantgegevens. Gebruik een wachtwoord van minimaal 12 tekens.");
- try{
-  const hash=await bcrypt.hash(password,12);
-  const result=db.prepare("INSERT INTO users (name,email,password_hash,role,active) VALUES (?,?,?,'customer',1)").run(name,email,hash);
-  req.session.regenerate(err=>{if(err)return res.status(500).send("Account aangemaakt, maar inloggen is niet gelukt. Ga naar inloggen.");req.session.user={id:Number(result.lastInsertRowid),name,email,role:"customer"};res.redirect("/");});
- }catch(err){if(String(err.message).includes("UNIQUE"))return res.status(409).send(page(req,"Account bestaat al",'<div class="alert">Er bestaat al een account met dit e-mailadres. <a href="/login">Log in</a>.</div>'));console.error(err);res.status(500).send("Account aanmaken is mislukt.");}
-});
+app.get("/register",(req,res)=>res.redirect("/login"));
+app.post("/register",(req,res)=>res.status(403).send("Accountregistratie is alleen mogelijk via beheer."));
 
 app.get("/login",(req,res)=>{
   if(req.session.user)return res.redirect("/");
@@ -173,16 +162,33 @@ app.post("/orders/:id/cancel",requireAuth,(req,res)=>{
   res.redirect(`/orders/${id}`);
 });
 
+
 app.get("/admin",requireAuth,requireAdmin,(req,res)=>{
-  const customers=db.prepare("SELECT id,name,email,active,created_at FROM users WHERE role='customer' ORDER BY name").all();
-  const body=`<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Beheer klanttoegang en bekijk de klantenlijst.</p></div><div class="panel"><h2>Klant toevoegen</h2><form method="post" action="/admin/customers" class="stack"><label>Naam<input name="name" required maxlength="120"></label><label>E-mailadres<input name="email" type="email" required maxlength="190"></label><label>Tijdelijk wachtwoord<input name="password" type="password" minlength="12" required></label><button class="primary">Klant aanmaken</button></form></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>${customers.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.email)}</td><td>${c.active?"Actief":"Uitgeschakeld"}</td><td><a href="/admin/customers/${c.id}">Bekijken</a> · <form method="post" action="/admin/customers/${c.id}/access"><button class="secondary">${c.active?"Uitschakelen":"Activeren"}</button></form></td></tr>`).join("")}</tbody></table></div>`;
-  res.send(page(req,"Beheer",body));
+ const customers=db.prepare("SELECT id,name,email,active,wc_customer_id FROM users WHERE role='customer' ORDER BY name").all();
+ const rows=customers.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+esc(c.email)+'</td><td>'+(c.wc_customer_id?'#'+esc(c.wc_customer_id):'Niet gekoppeld')+'</td><td>'+(c.active?'Actief':'Uitgeschakeld')+'</td><td><a href="/admin/customers/'+c.id+'">Bekijken</a> · <form method="post" action="/admin/customers/'+c.id+'/access"><button class="secondary">'+(c.active?'Uitschakelen':'Activeren')+'</button></form></td></tr>').join("");
+ res.send(page(req,"Beheer",'<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Alleen WooCommerce-klanten die je hier toevoegt krijgen toegang.</p><a class="primary inline" href="/admin/customers/search">Klant toevoegen →</a></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>WooCommerce</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen klanten toegevoegd.</td></tr>')+'</tbody></table></div>'));
 });
-app.post("/admin/customers",requireAuth,requireAdmin,async(req,res)=>{
- const name=String(req.body.name||"").trim(),email=String(req.body.email||"").trim().toLowerCase(),password=String(req.body.password||"");
- if(name.length<2||name.length>120||email.indexOf("@")<1||email.lastIndexOf(".")<email.indexOf("@")+2||password.length<12||password.length>200)return res.status(400).send("Ongeldige klantgegevens. Gebruik een wachtwoord van minimaal 12 tekens.");
- try{const hash=await bcrypt.hash(password,12);db.prepare("INSERT INTO users (name,email,password_hash,role,active) VALUES (?,?,?, ?,1)").run(name,email,hash,"customer");res.redirect("/admin");}
- catch(err){if(String(err.message).includes("UNIQUE"))return res.status(409).send("Er bestaat al een account met dit e-mailadres.");console.error(err);res.status(500).send("Klant toevoegen is mislukt.");}
+app.get("/admin/customers/search",requireAuth,requireAdmin,async(req,res)=>{
+ const q=String(req.query.q||"").trim();let customers=[],error="";
+ if(q.length>=2){try{customers=await woo.searchCustomers(q);}catch(err){console.error(err.message);error="WooCommerce-klanten konden niet worden opgehaald. Controleer de API-instellingen.";}}
+ const rows=customers.map(c=>{
+  const email=String(c.email||"").trim().toLowerCase(),name=[c.first_name,c.last_name].filter(Boolean).join(" ")||email;
+  const existing=email?db.prepare("SELECT id,wc_customer_id FROM users WHERE email=? COLLATE NOCASE").get(email):null;
+  return '<div class="order-row"><div><strong>'+esc(name)+'</strong><small>'+esc(email)+'</small></div><div>WooCommerce #'+esc(c.id)+'</div><div>'+(existing?(existing.wc_customer_id?'Al gekoppeld':'Supply-account bestaat'):'Nog geen Supply-account')+'</div><form method="post" action="/admin/customers/link" class="stack"><input type="hidden" name="wc_customer_id" value="'+esc(c.id)+'"><label>Startwachtwoord<input name="password" type="password" minlength="12" maxlength="200" required placeholder="Minimaal 12 tekens"></label><button class="primary">'+(existing?'Account koppelen / herstellen':'Toegang geven')+'</button></form></div>';
+ }).join("");
+ res.send(page(req,"Klant toevoegen",'<div class="page-title"><div class="eyebrow">WOOCOMMERCE</div><h1>Klant toevoegen</h1><p>Zoek een geregistreerde WooCommerce-klant op naam of e-mailadres.</p></div><div class="panel"><form method="get" action="/admin/customers/search" class="stack"><label>Naam of e-mailadres<input name="q" value="'+esc(q)+'" minlength="2" required placeholder="Naam of e-mailadres"></label><button class="primary">Zoeken in WooCommerce</button></form></div>'+(error?'<div class="alert">'+esc(error)+'</div>':'')+'<div class="panel">'+(q.length<2?'<div class="empty">Vul minimaal twee tekens in.</div>':rows||'<div class="empty">Geen WooCommerce-klanten gevonden.</div>')+'</div><a class="back" href="/admin">← Terug naar klanten</a>'));
+});
+app.post("/admin/customers/link",requireAuth,requireAdmin,async(req,res)=>{
+ const wcId=String(req.body.wc_customer_id||"").trim(),password=String(req.body.password||"");
+ if(!/^\\d+$/.test(wcId)||password.length<12||password.length>200)return res.status(400).send("Ongeldig account of wachtwoord (minimaal 12 tekens).");
+ try{
+  const c=await woo.getCustomer(wcId),email=String(c.email||"").trim().toLowerCase(),name=[c.first_name,c.last_name].filter(Boolean).join(" ")||email;
+  if(!email||email.indexOf("@")<1)return res.status(400).send("Deze WooCommerce-klant heeft geen geldig e-mailadres.");
+  const hash=await bcrypt.hash(password,12),existing=db.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE").get(email);
+  if(existing)db.prepare("UPDATE users SET name=?,password_hash=?,role='customer',active=1,wc_customer_id=? WHERE id=?").run(name,hash,wcId,existing.id);
+  else db.prepare("INSERT INTO users (name,email,password_hash,role,active,wc_customer_id) VALUES (?,?,?,'customer',1,?)").run(name,email,hash,wcId);
+  res.redirect("/admin");
+ }catch(err){console.error("WooCommerce customer linking:",err.message);res.status(502).send("Klant koppelen is mislukt. Controleer de WooCommerce API en klantkoppeling.");}
 });
 app.post("/admin/customers/:id/access",requireAuth,requireAdmin,(req,res)=>{
   const id=Number(req.params.id),customer=db.prepare("SELECT id FROM users WHERE id=? AND role='customer'").get(id);
