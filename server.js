@@ -414,7 +414,7 @@ app.post("/admin/subscriptions/:id/generate",requireAuth,requireAdmin,async(req,
   const orderId=createOrder(sub.user_id,lines,null,"Handmatig aangemaakte bestelling voor abonnement: "+sub.name,id);
   await syncWooOrder(orderId);
   await sendOrderWebhook(orderId);
-  res.redirect("/admin/orders");
+  res.redirect("/admin/subscriptions/"+id+"/products?order_created=1");
  }catch(err){console.error("Manual subscription order failed:",err.message);res.status(502).send("Bestelling kon niet worden aangemaakt: "+esc(err.message));}
 });
 app.post("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=>{
