@@ -49,5 +49,13 @@ async function createWooSubscription(subscription,items){
  return request("subscriptions","POST",payload);
 }
 async function refreshWooOrder(localOrderId){return null;}
-async function getInvoice(wcOrderId){return request(`orders/${encodeURIComponent(wcOrderId)}?context=view`);}
-module.exports={request,listProducts,searchCustomers,getCustomer,createExpenseOrder,createWooOrder,refreshWooOrder,getInvoice};
+async function getInvoicePdf(wcOrderId){
+ const c=config();
+ if(!process.env.WPO_WCPDF_API_TOKEN)throw new Error("WPO_WCPDF_API_TOKEN ontbreekt");
+ const auth=Buffer.from(c.key+":"+c.secret).toString("base64");
+ const response=await axios({url:`${c.base}/wp-json/bendemen/v1/orders/${encodeURIComponent(wcOrderId)}/invoice`,method:"GET",headers:{Authorization:`Basic ${auth}`,"X-Bendemen-Invoice-Token":process.env.WPO_WCPDF_API_TOKEN},responseType:"arraybuffer",timeout:30000,validateStatus:status=>status>=200&&status<300});
+ const pdf=Buffer.from(response.data);
+ if(pdf.subarray(0,5).toString()!=="%PDF-")throw new Error("WP Overnight retourneerde geen geldige PDF");
+ return pdf;
+}
+module.exports={request,listProducts,searchCustomers,getCustomer,createExpenseOrder,createWooOrder,createWooSubscription,refreshWooOrder,getInvoicePdf};
