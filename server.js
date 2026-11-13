@@ -123,7 +123,7 @@ app.post("/webhooks/woocommerce", (req,res) => {
   // It contains only webhook_id; acknowledge it without creating an order.
   if (!signature && req.is("application/x-www-form-urlencoded") &&
       req.body && Object.keys(req.body).length === 1 &&
-      /^\\d+$/.test(String(req.body.webhook_id || ""))) {
+      /^\d+$/.test(String(req.body.webhook_id || ""))) {
     console.info("WooCommerce webhook setup-ping bevestigd.", { webhookId: String(req.body.webhook_id) });
     return res.status(200).json({ received: true, ping: true });
   }
