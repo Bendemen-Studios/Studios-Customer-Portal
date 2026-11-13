@@ -81,8 +81,9 @@ async function getInvoicePdf(wcOrderId){
  const c=config();
  if(!process.env.WPO_WCPDF_API_TOKEN)throw new Error("WPO_WCPDF_API_TOKEN ontbreekt");
  const auth=Buffer.from(c.key+":"+c.secret).toString("base64");
- const response=await axios({url:`${c.base}/wp-json/bendemen/v1/orders/${encodeURIComponent(wcOrderId)}/invoice`,method:"GET",headers:{Authorization:`Basic ${auth}`,"X-Bendemen-Invoice-Token":process.env.WPO_WCPDF_API_TOKEN},responseType:"arraybuffer",timeout:30000,validateStatus:status=>status>=200&&status<300});
- const pdf=Buffer.from(response.data);
+ const response=await axios({url:`${c.base}/wp-json/bendemen/v1/orders/${encodeURIComponent(wcOrderId)}/invoice`,method:"GET",headers:{Authorization:`Basic ${auth}`,"X-Bendemen-Invoice-Token":process.env.WPO_WCPDF_API_TOKEN},timeout:60000});
+ if(!response.data||typeof response.data.pdf_base64!=="string")throw new Error(response.data?.message||"WP Overnight retourneerde geen PDF");
+ const pdf=Buffer.from(response.data.pdf_base64,"base64");
  if(pdf.subarray(0,5).toString()!=="%PDF-")throw new Error("WP Overnight retourneerde geen geldige PDF");
  return pdf;
 }
