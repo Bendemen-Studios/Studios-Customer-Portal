@@ -5,12 +5,12 @@
 /* Navigatie dropdown en profielicoon */
 .top nav{align-items:center}
 .nav-dropdown{position:relative;color:#c7ccc4;font-size:13px}
-.nav-dropdown summary{list-style:none;cursor:pointer;user-select:none;padding:8px 2px}
+.nav-dropdown summary{list-style:none;cursor:pointer;user-select:none;padding:8px 2px;display:flex;align-items:center;gap:5px}.nav-dropdown summary::marker{content:""}.nav-dropdown summary::-webkit-details-marker{display:none}
 .nav-dropdown summary::-webkit-details-marker{display:none}
 .nav-dropdown summary:hover,.nav-dropdown[open] summary{color:var(--white)}
 .nav-dropdown .chevron{display:inline-block;margin-left:5px;color:var(--muted);transition:transform .15s}
 .nav-dropdown[open] .chevron{transform:rotate(180deg)}
-.nav-dropdown-menu{position:absolute;z-index:20;top:calc(100% + 10px);left:-14px;min-width:170px;padding:7px;background:#1b1d1b;border:1px solid var(--line);box-shadow:0 12px 28px #0008;display:grid;gap:2px}
+.nav-dropdown-menu{position:absolute;z-index:20;top:calc(100% + 10px);left:-14px;min-width:170px;padding:7px;background:#1b1d1b;border:1px solid var(--line);box-shadow:0 12px 28px #0008;display:flex;flex-direction:column;align-items:stretch;gap:2px}
 .nav-dropdown-menu a{display:block;padding:10px 12px;border-radius:3px;color:#c7ccc4;font-size:13px;white-space:nowrap}
 .nav-dropdown-menu a:hover{background:#292d29;color:var(--white)}
 .account{margin-left:auto}
