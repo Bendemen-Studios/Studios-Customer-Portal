@@ -1,8 +1,8 @@
 {
-  "name": "bendemen-customer-panel",
+  "name": "bendemen-supply-panel",
   "version": "1.10.0",
   "private": true,
-  "description": "Bendemen Studios customer portal",
+  "description": "Bendemen Supply Panel",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
