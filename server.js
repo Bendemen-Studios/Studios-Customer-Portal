@@ -275,7 +275,7 @@ app.get("/admin/subscriptions",requireAuth,requireAdmin,(req,res)=>{
 });
 app.post("/admin/subscriptions",requireAuth,requireAdmin,(req,res)=>{
  const user=db.prepare("SELECT id FROM users WHERE id=? AND role='customer'").get(Number(req.body.user_id)),name=String(req.body.name||"").trim(),amount=moneyInput(req.body.amount),interval=["week","month","year"].includes(req.body.interval)?req.body.interval:"month",next=String(req.body.next_payment||"");
- if(!user||!name||!Number.isSafeInteger(amount)||amount<0||next&&!/^\d{4}-\d{2}-\d{2}$/.test(next))return res.status(400).send("Controleer de abonnementsgegevens.");
+ if(!user||!name||!Number.isSafeInteger(amount)||amount<0||!next||next&&!/^\d{4}-\d{2}-\d{2}$/.test(next))return res.status(400).send("Controleer de abonnementsgegevens en kies een eerste besteldatum.");
  db.prepare("INSERT INTO recurring_orders (user_id,name,amount_cents,interval,next_payment) VALUES (?,?,?,?,?)").run(user.id,name,amount,interval,next||null);res.redirect("/admin/subscriptions");
 });
 app.get("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=>{
