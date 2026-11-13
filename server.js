@@ -50,7 +50,7 @@ const money = euro;
 function page(req, title, body) {
   const user = req.session.user;
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · Bendemen Studios</title><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="stylesheet" href="/style.css"></head><body>
-  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/costs">Maandkosten</a><a href="/subscriptions">Diensten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a><a href="/admin/costs">Kosten</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
+  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/services">Diensten & kosten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a><a href="/admin/costs">Kosten</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
   <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Bendemen Supply Panel</span></footer></body></html>`;
 }
 function moneyInput(value) { return Math.round(Number(String(value).replace(",", ".")) * 100); }
@@ -72,8 +72,17 @@ function getOrders(userId, limit = 100) {
     FROM orders o WHERE o.user_id=? ORDER BY o.id DESC LIMIT ?`).all(userId, limit);
 }
 async function syncWooOrder(orderId) {
-  try { const result = await woo.createWooOrder(orderId); if (result?.payment_url) console.log(`WooCommerce order ${result.id} aangemaakt voor lokale order ${orderId}`); return result; }
-  catch (err) { console.error(`WooCommerce order sync mislukt voor lokale order ${orderId}:`, err.message); return null; }
+  try {
+    const order=db.prepare("SELECT o.*,u.wc_customer_id,u.email customer_email,u.name customer_name FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=?").get(orderId);
+    if(!order)throw new Error("Lokale bestelling niet gevonden.");
+    const items=db.prepare("SELECT * FROM order_items WHERE order_id=?").all(orderId);
+    const result=await woo.createWooOrder(order,items);
+    if(result?.id){
+      db.prepare("UPDATE orders SET wc_order_id=?,wc_status=?,payment_url=? WHERE id=?").run(String(result.id),result.status||"pending",result.payment_url||null,orderId);
+      console.log(`WooCommerce order ${result.id} aangemaakt voor lokale order ${orderId}`);
+    }
+    return result;
+  } catch (err) { console.error(`WooCommerce order sync mislukt voor lokale order ${orderId}:`, err.message); return null; }
 }
 async function sendOrderWebhook(orderId) {
   const url = process.env.ORDER_WEBHOOK_URL; if (!url) return;
@@ -204,15 +213,14 @@ app.get("/admin/customers/:id",requireAuth,requireAdmin,(req,res)=>{
 });
 
 
-app.get("/costs",requireAuth,(req,res)=>{
+app.get("/costs",requireAuth,(req,res)=>res.redirect("/services"));
+app.get("/subscriptions",requireAuth,(req,res)=>res.redirect("/services"));
+app.get("/services",requireAuth,(req,res)=>{
  const costs=db.prepare("SELECT * FROM monthly_costs WHERE user_id=? ORDER BY active DESC,id DESC").all(req.session.user.id);
- const rows=costs.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+esc(c.interval)+'</td><td>'+money(c.amount_cents)+'</td><td>'+(c.active?'Actief':'Gestopt')+'</td></tr>').join("");
- res.send(page(req,"Maandkosten",'<div class="page-title"><div class="eyebrow">OVERZICHT</div><h1>Maandkosten</h1><p>Terugkerende kosten die aan je account zijn gekoppeld.</p></div><div class="panel"><div class="table-wrap"><table><thead><tr><th>Omschrijving</th><th>Periode</th><th>Bedrag</th><th>Status</th></tr></thead><tbody>'+ (rows||'<tr><td colspan="4">Er zijn nog geen maandkosten gekoppeld.</td></tr>') +'</tbody></table></div></div>'));
-});
-app.get("/subscriptions",requireAuth,(req,res)=>{
+ const costRows=costs.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+esc(c.interval)+'</td><td>'+money(c.amount_cents)+'</td><td>'+(c.active?'Actief':'Gestopt')+'</td></tr>').join("");
  const subs=db.prepare("SELECT * FROM recurring_orders WHERE user_id=? ORDER BY id DESC").all(req.session.user.id);
  const cards=subs.map(sub=>{const items=db.prepare("SELECT product_name,quantity,unit_price_cents FROM recurring_order_items WHERE recurring_order_id=?").all(sub.id);return '<div class="order-row"><div><strong>'+esc(sub.name)+'</strong><small>'+esc(sub.interval)+' · '+esc(sub.status)+'</small></div><div class="order-products">'+esc(items.map(x=>x.quantity+'× '+x.product_name).join(', ')||'Geen producten gekoppeld')+'</div><strong>'+money(sub.amount_cents)+'</strong><div>'+(sub.next_payment?'Volgende betaling: '+esc(sub.next_payment):'')+'</div></div>';}).join("");
- res.send(page(req,"Diensten",'<div class="page-title"><div class="eyebrow">JOUW DIENSTEN</div><h1>Abonnementen & diensten</h1><p>Bekijk je actieve diensten en gekoppelde producten.</p></div><div class="panel">'+(cards||'<div class="empty">Er zijn nog geen diensten aan je account gekoppeld.</div>')+'</div>'));
+ res.send(page(req,"Diensten & kosten",'<div class="page-title"><div class="eyebrow">JOUW OVERZICHT</div><h1>Diensten & kosten</h1><p>Bekijk je gekoppelde diensten, abonnementen en terugkerende kosten.</p></div><div class="panel"><h2>Diensten & abonnementen</h2>'+(cards||'<div class="empty">Er zijn nog geen diensten aan je account gekoppeld.</div>')+'</div><div class="panel"><h2>Maandelijkse kosten</h2><div class="table-wrap"><table><thead><tr><th>Omschrijving</th><th>Periode</th><th>Bedrag</th><th>Status</th></tr></thead><tbody>'+(costRows||'<tr><td colspan="4">Er zijn nog geen maandkosten gekoppeld.</td></tr>')+'</tbody></table></div></div>'));
 });
 app.get("/admin/products",requireAuth,requireAdmin,(req,res)=>{
  const products=db.prepare("SELECT * FROM products ORDER BY active DESC,name").all();
