@@ -118,6 +118,22 @@ app.post("/webhooks/woocommerce", (req,res) => {
   const secret = process.env.WC_WEBHOOK_SECRET;
   const signature = req.get("x-wc-webhook-signature") || "";
   const rawBody = req.rawBody;
+  // Veilige diagnose: log alleen headernamen en algemene requestmetadata, nooit headerwaarden of payload/secret.
+  console.info("WooCommerce webhook ontvangen:", {
+    method: req.method,
+    path: req.path,
+    contentType: req.get("content-type") || null,
+    contentLength: req.get("content-length") || null,
+    userAgent: req.get("user-agent") || null,
+    host: req.get("host") || null,
+    forwardedProto: req.get("x-forwarded-proto") || null,
+    headerNames: Object.keys(req.headers).sort(),
+    signaturePresent: !!signature,
+    rawBodyPresent: !!rawBody,
+    rawBodyLength: rawBody ? rawBody.length : 0,
+    bodyType: Array.isArray(req.body) ? "array" : typeof req.body,
+    bodyKeys: req.body && typeof req.body === "object" ? Object.keys(req.body).slice(0, 30) : []
+  });
   if (!secret) {
     console.error("WooCommerce webhook auth: WC_WEBHOOK_SECRET ontbreekt.");
     return res.status(503).json({ error: "WC_WEBHOOK_SECRET is niet ingesteld." });
