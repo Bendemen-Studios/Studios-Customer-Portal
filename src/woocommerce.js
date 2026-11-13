@@ -53,7 +53,7 @@ async function updateWooOrder(wcOrderId,items){
  const line_items=[],fee_lines=[];
  for(const item of items){
   const total=(item.quantity*item.unit_price_cents/100).toFixed(2);
-  const wcProductId=item.product_id&&/^\\d+$/.test(String(item.product_id))?String(item.product_id):null;
+  const wcProductId=item.product_id&&/^\d+$/.test(String(item.product_id))?String(item.product_id):null;
   if(wcProductId){
    const match=(existing.line_items||[]).find(line=>String(line.product_id)===wcProductId);
    line_items.push({...(match?{id:match.id}:{}),product_id:Number(wcProductId),quantity:item.quantity,subtotal:total,total});
