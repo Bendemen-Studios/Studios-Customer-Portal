@@ -405,7 +405,7 @@ app.get("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=>
  const id=Number(req.params.id),sub=db.prepare("SELECT r.*,u.name customer_name FROM recurring_orders r JOIN users u ON u.id=r.user_id WHERE r.id=?").get(id);if(!sub)return res.status(404).send("Abonnement niet gevonden.");
  const generationToken=crypto.randomBytes(32).toString("hex");db.prepare("UPDATE recurring_orders SET manual_generation_token=? WHERE id=?").run(generationToken,id);
  const products=db.prepare("SELECT id,wc_product_id,name,price_cents,source FROM products WHERE active=1 ORDER BY name").all(),options=products.map(p=>'<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:6px"><input type="checkbox" name="product_ids" value="'+p.id+'" style="width:auto;margin:0"><span>'+esc(p.name)+(p.wc_product_id?' · WooCommerce #'+esc(p.wc_product_id):' · Lokaal')+' — '+money(p.price_cents)+'</span></label>').join("")||'<p>Geen actieve producten gevonden.</p>';
- const lines=db.prepare("SELECT * FROM recurring_order_items WHERE recurring_order_id=?").all(id).map(x=>'<tr><td>'+esc(x.product_name)+'</td><td>'+x.quantity+'</td><td>'+money(x.unit_price_cents)+'</td></tr>').join("");
+ const lines=db.prepare("SELECT * FROM recurring_order_items WHERE recurring_order_id=?").all(id).map(x=>'<tr><td>'+esc(x.product_name)+'</td><td>'+x.quantity+'</td><td><form method="post" action="/admin/subscriptions/'+id+'/items/'+x.id+'/price" style="display:flex;gap:8px;align-items:center"><input name="price" inputmode="decimal" value="'+(x.unit_price_cents/100).toFixed(2).replace(".",",") +'" aria-label="Prijs per stuk" style="max-width:110px"><button class="secondary">Prijs opslaan</button></form></td></tr>').join("");
  res.send(page(req,"Abonnement beheren",'<div class="page-title"><h1>Abonnement beheren</h1><p>'+esc(sub.name)+' · '+esc(sub.customer_name)+'</p></div><div class="panel"><h2>Volgende besteldatum aanpassen</h2><form method="post" action="/admin/subscriptions/'+id+'/date" class="stack"><label>Volgende besteldatum<input type="date" name="next_payment" value="'+esc(sub.next_payment||"")+'" required></label><button class="primary">Datum opslaan</button></form></div><div class="panel"><h2>Handmatig bestelling aanmaken</h2><p>Maakt direct een bestelling met de gekoppelde producten. De volgende besteldatum verandert hierdoor niet.</p><form method="post" action="/admin/subscriptions/'+id+'/generate" onsubmit="return confirm(&quot;Weet je zeker dat je nu een bestelling wilt aanmaken?&quot;)"><input type="hidden" name="generation_token" value="'+generationToken+'"><button class="primary">Nu bestelling aanmaken</button></form></div><div class="panel"><h2>Producten toevoegen</h2><form method="post" action="/admin/subscriptions/'+id+'/products" class="stack"><div class="field"><span class="field-label">Selecteer producten</span><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px;max-height:320px;overflow:auto;padding:2px">'+options+'</div></div><label>Aantal per product<input name="quantity" type="number" min="1" max="999" value="1" required></label><button class="primary">Producten toevoegen</button></form></div><div class="panel"><h2>Gekoppelde producten</h2><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th></tr></thead><tbody>'+(lines||'<tr><td colspan="3">Nog geen producten gekoppeld.</td></tr>')+'</tbody></table></div>'));
 });
 app.post("/admin/subscriptions/:id/date",requireAuth,requireAdmin,(req,res)=>{
@@ -439,6 +439,17 @@ app.post("/admin/subscriptions/:id/generate",requireAuth,requireAdmin,async(req,
   await sendOrderWebhook(orderId);
   res.redirect("/admin/subscriptions/"+id+"/products?order_created=1");
  }catch(err){console.error("Manual subscription order sync failed:",err.message);res.status(502).send("Bestelling is lokaal aangemaakt, maar synchronisatie is mislukt: "+esc(err.message));}
+});
+app.post("/admin/subscriptions/:id/items/:itemId/price",requireAuth,requireAdmin,(req,res)=>{
+ const id=Number(req.params.id),itemId=Number(req.params.itemId),price=moneyInput(req.body.price);
+ const item=db.prepare("SELECT id FROM recurring_order_items WHERE id=? AND recurring_order_id=?").get(itemId,id);
+ if(!item||!Number.isSafeInteger(price)||price<0||price>100000000)return res.status(400).send("Ongeldige prijs of productkoppeling.");
+ const tx=db.transaction(()=>{
+  db.prepare("UPDATE recurring_order_items SET unit_price_cents=? WHERE id=? AND recurring_order_id=?").run(price,itemId,id);
+  db.prepare("UPDATE recurring_orders SET amount_cents=(SELECT COALESCE(SUM(quantity*unit_price_cents),0) FROM recurring_order_items WHERE recurring_order_id=?) WHERE id=?").run(id,id);
+ });
+ tx();
+ res.redirect("/admin/subscriptions/"+id+"/products?price_updated=1");
 });
 app.post("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=>{
  const id=Number(req.params.id),sub=db.prepare("SELECT id FROM recurring_orders WHERE id=?").get(id),rawIds=req.body.product_ids||[],productIds=[...new Set((Array.isArray(rawIds)?rawIds:[rawIds]).map(x=>Number(x)).filter(Number.isSafeInteger))],products=productIds.length?db.prepare("SELECT * FROM products WHERE active=1 AND id IN ("+productIds.map(()=>"?").join(",")+")").all(...productIds):[],qty=Number(req.body.quantity);
