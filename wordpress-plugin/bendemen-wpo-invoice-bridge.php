@@ -14,7 +14,7 @@ add_action('rest_api_init', function () {
         return new WP_Error('wpo_unavailable', 'WP Overnight PDF Invoices is not active or supported.', array('status' => 503));
       }
 
-      $expected = defined('BENDMEN_WPO_WCPDF_API_TOKEN') ? (string) BENDMEN_WPO_WCPDF_API_TOKEN : '';
+      $expected = defined('BENDEMEN_WPO_WCPDF_API_TOKEN') ? (string) BENDEMEN_WPO_WCPDF_API_TOKEN : '';
       $provided = (string) $request->get_header('x-bendemen-invoice-token');
       if ($expected === '' || $provided === '' || !hash_equals($expected, $provided)) {
         return new WP_Error('forbidden', 'Invalid invoice API token.', array('status' => 403));
