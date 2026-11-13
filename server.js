@@ -230,7 +230,7 @@ app.get("/orders/:id",requireAuth,async(req,res)=>{
   const payBlock=fresh.payment_url&&!["processing","completed","refunded","cancelled"].includes(fresh.wc_status)?`<div class="payment-box"><div><strong>Deze bestelling staat nog open</strong><p>Betaal veilig via de betaalpagina van Bendemen Studios.</p></div><a class="primary" href="/orders/${id}/pay">Nu betalen <span>→</span></a></div>`:(fresh.wc_status?`<p class="hint">WooCommerce-status: ${esc(displayOrderStatus(fresh))}</p>`:'<p class="hint">De WooCommerce-betaallink verschijnt zodra de winkelkoppeling is ingesteld.</p>');
   const cancelBlock=canCancel?`<form method="post" action="/orders/${id}/cancel" class="cancel-box"><div><strong>Bestelling annuleren</strong><p>Dit kan zolang de bestelling nog niet in behandeling is genomen.</p></div><button class="danger">Bestelling annuleren</button></form>`:"";
   const invoiceBlock=fresh.wc_order_id&&["processing","completed","refunded"].includes(fresh.wc_status)?`<p class="invoice-action"><a class="secondary" href="/orders/${id}/invoice" target="_blank" rel="noopener">Factuur downloaden (PDF) →</a></p>`:"";
-  res.send(page(req,"Bestelling",`<a class="back" href="/orders">← Terug naar bestellingen</a><div class="page-title"><div class="eyebrow">BESTELLING BDS-${String(id).padStart(6,"0")}${fresh.wc_order_id?` · WC #${fresh.wc_order_id}`:""}</div><h1>Bestelling bekijken</h1><p>Aangemaakt op ${esc(o.created_at)} · <span class="status">${esc(displayOrderStatus(fresh))}</span></p></div>${payBlock}${cancelBlock}${invoiceBlock}<div class="panel"><div class="table-wrap"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th><th>Totaal</th></tr></thead><tbody>${rows}</tbody></table></div><div class="total-line"><span>Ordertotaal</span><strong>${money(o.total_cents)}</strong></div></div><form method="post" action="/orders/${id}/reorder" class="reorder-form"><div><strong>Dit product opnieuw bestellen?</strong><p>We maken direct een nieuwe order aan met dezelfde producten en aantallen.</p></div><button class="primary">Opnieuw bestellen <span>→</span></button></form>`));
+  res.send(page(req,"Bestelling",`<a class="back" href="/orders">← Terug naar bestellingen</a><div class="page-title"><div class="eyebrow">BESTELLING BDS-${String(id).padStart(6,"0")}${fresh.wc_order_id?` · WC #${fresh.wc_order_id}`:""}</div><h1>Bestelling bekijken</h1><p>Aangemaakt op ${esc(o.created_at)} · <span class="status">${esc(displayOrderStatus(fresh))}</span></p></div>${payBlock}${cancelBlock}${invoiceBlock}<div class="panel"><div class="table-wrap"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th><th>Totaal</th></tr></thead><tbody>${rows}</tbody></table></div><div class="total-line"><span>Ordertotaal</span><strong>${money(o.total_cents)}</strong></div></div>${fresh.allow_reorder!==0?`<form method="post" action="/orders/${id}/reorder" class="reorder-form"><div><strong>Dit product opnieuw bestellen?</strong><p>We maken direct een nieuwe order aan met dezelfde producten en aantallen.</p></div><button class="primary">Opnieuw bestellen <span>→</span></button></form>`:`<p class="hint">Dit is een maatwerkbestelling. Opnieuw bestellen is voor deze bestelling uitgeschakeld.</p>`}`));
 });
 app.get("/orders/:id/pay",requireAuth,(req,res)=>{
   const id=Number(req.params.id),order=db.prepare("SELECT id,payment_url,wc_status,workflow_status FROM orders WHERE id=? AND user_id=?").get(id,req.session.user.id);
@@ -259,10 +259,44 @@ app.post("/orders/:id/cancel",requireAuth,(req,res)=>{
 });
 
 
+app.get("/admin/orders/new",requireAuth,requireAdmin,(req,res)=>{
+ const customers=db.prepare("SELECT id,name,email FROM users WHERE role='customer' AND active=1 ORDER BY name").all();
+ const products=db.prepare("SELECT id,name,price_cents FROM products WHERE active=1 ORDER BY name").all();
+ const customerOptions=customers.map(c=>'<option value="'+c.id+'">'+esc(c.name)+' — '+esc(c.email)+'</option>').join("");
+ const productOptions=products.map(p=>'<option value="'+p.id+'">'+esc(p.name)+' — '+money(p.price_cents)+'</option>').join("");
+ res.send(page(req,"Maatwerkbestelling toevoegen",'<a class="back" href="/admin">← Terug naar beheer</a><div class="page-title"><div class="eyebrow">HANDMATIGE BESTELLING</div><h1>Bestelling toevoegen</h1><p>Maak een bestelling voor een klant. Kies een bestaand product of maak direct een nieuw maatwerkproduct aan.</p></div><div class="panel"><form method="post" action="/admin/orders/new" class="stack"><label>Klant<select name="user_id" required>'+customerOptions+'</select></label><label>Type<select name="item_type" id="manual-item-type"><option value="existing">Bestaand product</option><option value="custom">Nieuw maatwerkproduct</option></select></label><label>Bestaand product<select name="product_id">'+productOptions+'</select></label><label>Naam maatwerkproduct<input name="custom_name" maxlength="180" placeholder="Bijv. 3D-geprinte sleutelhanger met foto"></label><label>Prijs per stuk in euro<input name="price" inputmode="decimal" placeholder="Bijv. 4,50"></label><label>Aantal<input name="quantity" type="number" min="1" max="999" value="1" required></label><p class="hint">Een nieuw maatwerkproduct wordt ook opgeslagen in Producten en gekoppeld aan deze bestelling. Maatwerkbestellingen kunnen niet opnieuw besteld worden door de klant.</p><button class="primary">Product en bestelling aanmaken</button></form></div>'));
+});
+app.post("/admin/orders/new",requireAuth,requireAdmin,(req,res)=>{
+ const user=db.prepare("SELECT id FROM users WHERE id=? AND role='customer' AND active=1").get(Number(req.body.user_id));
+ const type=String(req.body.item_type||"");
+ const qty=Number(req.body.quantity);
+ if(!user||!Number.isInteger(qty)||qty<1||qty>999)return res.status(400).send("Kies een bestaande klant en een geldig aantal.");
+ let product=null,name="",price=0,productId=null;
+ if(type==="existing"){
+   product=db.prepare("SELECT * FROM products WHERE id=? AND active=1").get(Number(req.body.product_id));
+   if(!product)return res.status(400).send("Kies een bestaand product.");
+   name=product.name;price=product.price_cents;productId=product.wc_product_id||("local:"+product.id);
+ }else if(type==="custom"){
+   name=String(req.body.custom_name||"").trim().slice(0,180);price=moneyInput(req.body.price);
+   if(!name||!Number.isSafeInteger(price)||price<0)return res.status(400).send("Vul een naam en geldige prijs voor het maatwerkproduct in.");
+ }else return res.status(400).send("Ongeldig producttype.");
+ const tx=db.transaction(()=>{
+   if(type==="custom"){
+     const p=db.prepare("INSERT INTO products (name,price_cents,source,active) VALUES (?,?,'manual',1)").run(name,price);
+     productId="local:"+String(p.lastInsertRowid);
+   }
+   const total=price*qty;
+   const order=db.prepare("INSERT INTO orders (user_id,status,total_cents,notes,allow_reorder) VALUES (?,'Nieuw',?,?,0)").run(user.id,total,"Handmatig toegevoegd door beheer — maatwerk / handmatige bestelling");
+   db.prepare("INSERT INTO order_items (order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)").run(order.lastInsertRowid,productId,name,qty,price);
+   return Number(order.lastInsertRowid);
+ });
+ const orderId=tx();
+ res.redirect("/admin/orders/"+orderId+"/products");
+});
 app.get("/admin",requireAuth,requireAdmin,(req,res)=>{
  const customers=db.prepare("SELECT id,name,email,active,wc_customer_id FROM users WHERE role='customer' ORDER BY name").all();
  const rows=customers.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+esc(c.email)+'</td><td>'+(c.wc_customer_id?'#'+esc(c.wc_customer_id):'Niet gekoppeld')+'</td><td>'+(c.active?'Actief':'Uitgeschakeld')+'</td><td><a href="/admin/customers/'+c.id+'">Bekijken</a> · <form method="post" action="/admin/customers/'+c.id+'/access"><button class="secondary">'+(c.active?'Uitschakelen':'Activeren')+'</button></form></td></tr>').join("");
- res.send(page(req,"Beheer",'<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Alleen WooCommerce-klanten die je hier toevoegt krijgen toegang.</p><a class="primary inline" href="/admin/customers/search">Klant toevoegen →</a></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>WooCommerce</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen klanten toegevoegd.</td></tr>')+'</tbody></table></div>'));
+ res.send(page(req,"Beheer",'<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Alleen WooCommerce-klanten die je hier toevoegt krijgen toegang.</p><a class="primary inline" href="/admin/customers/search">Klant toevoegen →</a> <a class="secondary" href="/admin/orders/new">Bestelling / maatwerk toevoegen →</a></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>WooCommerce</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen klanten toegevoegd.</td></tr>')+'</tbody></table></div>'));
 });
 app.get("/admin/customers/search",requireAuth,requireAdmin,async(req,res)=>{
  const q=String(req.query.q||"").trim();let customers=[],error="";
