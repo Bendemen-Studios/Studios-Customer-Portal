@@ -123,6 +123,7 @@ function addColumn(table, column, definition) {
  if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 addColumn("users", "active", "INTEGER NOT NULL DEFAULT 1");
+addColumn("recurring_orders", "last_generated_for", "TEXT");
 addColumn("products", "cost_cents", "INTEGER NOT NULL DEFAULT 0");
 addColumn("users", "wc_customer_id", "TEXT");
 db.exec("UPDATE users SET active=0 WHERE role='customer' AND wc_customer_id IS NULL");
