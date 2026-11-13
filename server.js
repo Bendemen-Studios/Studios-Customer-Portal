@@ -423,7 +423,7 @@ app.post("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=
  const tx=db.transaction(()=>{const insert=db.prepare("INSERT INTO recurring_order_items (recurring_order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)");for(const p of products){const recurringProductId=p.wc_product_id?String(p.wc_product_id):"local:"+String(p.id);insert.run(id,recurringProductId,p.name,qty,p.price_cents);}db.prepare("UPDATE recurring_orders SET amount_cents=(SELECT COALESCE(SUM(quantity*unit_price_cents),0) FROM recurring_order_items WHERE recurring_order_id=?) WHERE id=?").run(id,id);});
  tx();res.redirect("/admin/subscriptions/"+id+"/products");
 });
-app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>res.redirect("/admin/orders"));
+app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>res.redirect("/admin"));
 
 app.get("/health",(_req,res)=>res.json({ok:true}));
 app.use((err,req,res,next)=>{console.error(err);res.status(500).send("Er is iets misgegaan.");});
