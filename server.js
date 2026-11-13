@@ -300,7 +300,16 @@ app.post("/orders/:id/cancel",requireAuth,(req,res)=>{
 app.get("/admin",requireAuth,requireAdmin,(req,res)=>{
  const customers=db.prepare("SELECT id,name,email,active,wc_customer_id FROM users WHERE role='customer' ORDER BY name").all();
  const rows=customers.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+esc(c.email)+'</td><td>'+(c.wc_customer_id?'#'+esc(c.wc_customer_id):'Niet gekoppeld')+'</td><td>'+(c.active?'Actief':'Uitgeschakeld')+'</td><td><a href="/admin/customers/'+c.id+'">Bekijken</a> · <form method="post" action="/admin/customers/'+c.id+'/access"><button class="secondary">'+(c.active?'Uitschakelen':'Activeren')+'</button></form></td></tr>').join("");
- res.send(page(req,"Beheer",'<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Alleen WooCommerce-klanten die je hier toevoegt krijgen toegang.</p><a class="primary inline" href="/admin/customers/search">Klant toevoegen →</a></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>WooCommerce</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen klanten toegevoegd.</td></tr>')+'</tbody></table></div>'));
+ res.send(page(req,"Beheer",'<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Alleen WooCommerce-klanten die je hier toevoegt krijgen toegang.</p><div class="row-actions"><a class="primary inline" href="/admin/customers/search">Klant toevoegen →</a><a class="secondary" href="/admin/orders">Orderoverzicht →</a></div></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>WooCommerce</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen klanten toegevoegd.</td></tr>')+'</tbody></table></div>'));
+});
+app.get("/admin/orders",requireAuth,requireAdmin,(req,res)=>{
+ const rows=db.prepare(`SELECT o.id,o.created_at,o.total_cents,o.status,o.wc_status,o.wc_order_id,o.payment_url,u.name customer_name,u.email customer_email,
+ (SELECT group_concat(oi.quantity || '× ' || oi.product_name, ', ') FROM order_items oi WHERE oi.order_id=o.id) summary
+ FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.id DESC LIMIT 500`).all();
+ const body='<a class="back" href="/admin">← Beheer</a><div class="page-title"><div class="eyebrow">BEHEER</div><h1>Orderoverzicht</h1><p>Lokale bestellingen en hun WooCommerce-koppeling.</p></div><div class="panel table-wrap"><table><thead><tr><th>Lokale order</th><th>Klant</th><th>Producten</th><th>Datum</th><th>Bedrag</th><th>WooCommerce</th></tr></thead><tbody>'+
+ (rows.map(o=>'<tr><td><strong>BDS-'+String(o.id).padStart(6,'0')+'</strong></td><td>'+esc(o.customer_name)+'<small>'+esc(o.customer_email)+'</small></td><td>'+esc(o.summary||'Geen orderregels')+'</td><td>'+esc(o.created_at)+'</td><td>'+money(o.total_cents)+'</td><td>'+(o.wc_order_id?'#'+esc(o.wc_order_id)+' · '+esc(o.wc_status||'Onbekend'):'Niet gekoppeld')+'</td></tr>').join('')||'<tr><td colspan="6">Nog geen bestellingen.</td></tr>')+
+ '</tbody></table></div><p class="hint">Toont de laatste 500 lokale bestellingen.</p>';
+ res.send(page(req,"Orderoverzicht",body));
 });
 app.get("/admin/customers/search",requireAuth,requireAdmin,async(req,res)=>{
  const q=String(req.query.q||"").trim();let customers=[],error="";
