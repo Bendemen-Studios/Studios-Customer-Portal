@@ -178,6 +178,12 @@ app.get("/admin",requireAuth,requireAdmin,(req,res)=>{
   const body=`<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Beheer klanttoegang en bekijk de klantenlijst.</p></div><div class="panel"><h2>Klant toevoegen</h2><form method="post" action="/admin/customers" class="stack"><label>Naam<input name="name" required maxlength="120"></label><label>E-mailadres<input name="email" type="email" required maxlength="190"></label><label>Tijdelijk wachtwoord<input name="password" type="password" minlength="12" required></label><button class="primary">Klant aanmaken</button></form></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>${customers.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.email)}</td><td>${c.active?"Actief":"Uitgeschakeld"}</td><td><a href="/admin/customers/${c.id}">Bekijken</a> · <form method="post" action="/admin/customers/${c.id}/access"><button class="secondary">${c.active?"Uitschakelen":"Activeren"}</button></form></td></tr>`).join("")}</tbody></table></div>`;
   res.send(page(req,"Beheer",body));
 });
+app.post("/admin/customers",requireAuth,requireAdmin,async(req,res)=>{
+ const name=String(req.body.name||"").trim(),email=String(req.body.email||"").trim().toLowerCase(),password=String(req.body.password||"");
+ if(name.length<2||name.length>120||!/\\S+@\\S+\\.\\S+/.test(email)||password.length<12||password.length>200)return res.status(400).send("Ongeldige klantgegevens. Gebruik een wachtwoord van minimaal 12 tekens.");
+ try{const hash=await bcrypt.hash(password,12);db.prepare("INSERT INTO users (name,email,password_hash,role,active) VALUES (?,?,?, ?,1)").run(name,email,hash,"customer");res.redirect("/admin");}
+ catch(err){if(String(err.message).includes("UNIQUE"))return res.status(409).send("Er bestaat al een account met dit e-mailadres.");console.error(err);res.status(500).send("Klant toevoegen is mislukt.");}
+});
 app.post("/admin/customers/:id/access",requireAuth,requireAdmin,(req,res)=>{
   const id=Number(req.params.id),customer=db.prepare("SELECT id FROM users WHERE id=? AND role='customer'").get(id);
   if(!customer)return res.status(404).send("Klant niet gevonden.");
