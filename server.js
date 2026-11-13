@@ -35,7 +35,7 @@ const PORT = Number(process.env.SERVER_PORT || process.env.PORT || 3000);
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.urlencoded({ extended: false, limit: "32kb" }));
+app.use(express.urlencoded({ extended: false, limit: "2mb", verify: (req,res,buf) => { req.rawBody = Buffer.from(buf); } }));
 app.use(express.json({ limit: "2mb", verify: (req,res,buf) => { req.rawBody = Buffer.from(buf); } }));
 class SQLiteSessionStore extends session.Store {
  get(sid,callback){try{const row=db.prepare("SELECT data FROM sessions WHERE sid=? AND expires_at>?").get(sid,Date.now());callback(null,row?JSON.parse(row.data):null);}catch(err){callback(err);}}
