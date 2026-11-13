@@ -58,19 +58,15 @@ class PersistentSessionStore extends session.Store {
     (async () => {
       const expiresAt = this._expires(sess);
       const ttl = Math.max(1, expiresAt - Date.now());
-      if (this.redis) {
-        try {
-          await this.redis.set(this.prefix + sid, JSON.stringify(sess), "PX", ttl);
-          return;
-        } catch (_) {
-          // Bewaar de sessie alsnog in MySQL als Redis niet bereikbaar is.
-        }
-      }
       await mysql.query(
         "INSERT INTO sessions (sid,data,expires_at) VALUES (?,?,?) " +
         "ON DUPLICATE KEY UPDATE data=VALUES(data),expires_at=VALUES(expires_at)",
         [sid, JSON.stringify(sess), expiresAt]
       );
+      if (this.redis) {
+        try { await this.redis.set(this.prefix + sid, JSON.stringify(sess), "PX", ttl); }
+        catch (_) { /* MySQL blijft de persistente bron. */ }
+      }
     })().then(() => callback && callback(null)).catch(error => callback && callback(error));
   }
 
@@ -86,14 +82,11 @@ class PersistentSessionStore extends session.Store {
   touch(sid, sess, callback) {
     (async () => {
       const expiresAt = this._expires(sess);
-      if (this.redis) {
-        try {
-          const ttl = Math.max(1, expiresAt - Date.now());
-          const result = await this.redis.pexpire(this.prefix + sid, ttl);
-          if (result) return;
-        } catch (_) {}
-      }
       await mysql.query("UPDATE sessions SET expires_at=? WHERE sid=?", [expiresAt, sid]);
+      if (this.redis) {
+        try { await this.redis.pexpire(this.prefix + sid, Math.max(1, expiresAt - Date.now())); }
+        catch (_) { /* MySQL blijft beschikbaar als Redis uitvalt. */ }
+      }
     })().then(() => callback && callback(null)).catch(error => callback && callback(error));
   }
 
