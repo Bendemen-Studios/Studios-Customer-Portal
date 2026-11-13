@@ -4,6 +4,7 @@ async function request(endpoint,method="GET",data){const c=config();const auth=B
 async function listProducts(page=1,perPage=100){return request(`products?status=any&per_page=${Math.min(100,perPage)}&page=${page}`);}
 async function searchCustomers(query,page=1){return request(`customers?search=${encodeURIComponent(query)}&per_page=30&page=${page}`);}
 async function getCustomer(id){return request(`customers/${encodeURIComponent(id)}`);}
+async function setCustomerPassword(id,password){const endpoint=process.env.WC_PASSWORD_SYNC_URL,token=process.env.WC_PASSWORD_SYNC_TOKEN;if(!endpoint||!token)throw new Error("WordPress wachtwoordsynchronisatie is niet geconfigureerd");const response=await axios({url:endpoint,method:"POST",data:{customer_id:String(id),password},headers:{"content-type":"application/json","x-bendemen-sync-token":token},timeout:20000});return response.data;}
 async function createExpenseOrder(expense){
  const payload={
   status:"on-hold",
@@ -50,4 +51,4 @@ async function createWooSubscription(subscription,items){
 }
 async function refreshWooOrder(localOrderId){return null;}
 async function getInvoice(wcOrderId){return request(`orders/${encodeURIComponent(wcOrderId)}?context=view`);}
-module.exports={request,listProducts,searchCustomers,getCustomer,createExpenseOrder,createWooOrder,refreshWooOrder,getInvoice};
+module.exports={request,listProducts,searchCustomers,getCustomer,setCustomerPassword,createExpenseOrder,createWooOrder,refreshWooOrder,getInvoice};
