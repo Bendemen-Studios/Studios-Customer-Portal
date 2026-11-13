@@ -93,7 +93,7 @@ async function syncWooOrder(orderId) {
     const result=order.wc_order_id?await woo.updateWooOrder(order.wc_order_id,items):await woo.createWooOrder(order,items);
     if(result?.id){
       db.prepare("UPDATE orders SET wc_order_id=?,wc_order_number=?,wc_status=?,payment_url=? WHERE id=?").run(String(result.id),result.number!=null?String(result.number):null,result.status||"pending",result.payment_url||null,orderId);
-      console.log(`WooCommerce order ${result.id} aangemaakt voor SUPPLY-${order.local_order_no||order.id} (lokale database-ID: ${orderId})`);
+      console.log(`WooCommerce order ${result.id} aangemaakt voor SUPPLY-${order.local_order_no||order.id}`);
       try{
         await woo.getInvoicePdf(result.id);
         console.log(`WP Overnight-factuur beschikbaar voor WooCommerce order ${result.id}`);
