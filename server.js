@@ -102,7 +102,7 @@ app.get("/register",(req,res)=>{
 });
 app.post("/register",loginLimiter,async(req,res)=>{
  const name=String(req.body.name||"").trim(),email=String(req.body.email||"").trim().toLowerCase(),password=String(req.body.password||"");
- if(name.length<2||name.length>120||!/^\S+@\S+\.\S+$/.test(email)||password.length<12||password.length>200)return res.status(400).send(page(req,"Account aanmaken",'<div class="alert">Controleer je gegevens. Het wachtwoord moet minimaal 12 tekens bevatten.</div><a href="/register">Opnieuw proberen</a>'));
+ if(name.length<2||name.length>120||email.indexOf("@")<1||email.lastIndexOf(".")<email.indexOf("@")+2||password.length<12||password.length>200)return res.status(400).send("Ongeldige klantgegevens. Gebruik een wachtwoord van minimaal 12 tekens.");
  try{
   const hash=await bcrypt.hash(password,12);
   const result=db.prepare("INSERT INTO users (name,email,password_hash,role,active) VALUES (?,?,?,'customer',1)").run(name,email,hash);
