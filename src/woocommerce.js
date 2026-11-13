@@ -19,7 +19,7 @@ async function createWooOrder(order,items){
  const line_items=[],fee_lines=[];
  for(const item of items){
   const total=(item.quantity*item.unit_price_cents/100).toFixed(2);
-  const wcProductId=item.product_id&&/^\\d+$/.test(String(item.product_id))?String(item.product_id):null;
+  const wcProductId=item.product_id&&/^\d+$/.test(String(item.product_id))?String(item.product_id):null;
   if(wcProductId){
    line_items.push({product_id:Number(wcProductId),quantity:item.quantity});
   }else{
@@ -40,7 +40,7 @@ async function createWooOrder(order,items){
 async function createWooSubscription(subscription,items){
  const line_items=[],fee_lines=[];
  for(const item of items){
-  const wcProductId=item.product_id&&/^\\d+$/.test(String(item.product_id))?String(item.product_id):null;
+  const wcProductId=item.product_id&&/^\d+$/.test(String(item.product_id))?String(item.product_id):null;
   if(wcProductId)line_items.push({product_id:Number(wcProductId),quantity:item.quantity});
   else fee_lines.push({name:item.quantity>1?`${item.product_name} (aantal: ${item.quantity})`:item.product_name,tax_status:"none",total:(item.quantity*item.unit_price_cents/100).toFixed(2)});
  }
