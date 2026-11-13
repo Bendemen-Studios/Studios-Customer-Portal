@@ -90,7 +90,7 @@ async function syncWooOrder(orderId) {
     const order=db.prepare("SELECT o.*,u.wc_customer_id,u.email customer_email,u.name customer_name FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=?").get(orderId);
     if(!order)throw new Error("Lokale bestelling niet gevonden.");
     const items=db.prepare("SELECT * FROM order_items WHERE order_id=?").all(orderId);
-    const result=await woo.createWooOrder(order,items);
+    const result=order.wc_order_id?await woo.updateWooOrder(order.wc_order_id,items):await woo.createWooOrder(order,items);
     if(result?.id){
       db.prepare("UPDATE orders SET wc_order_id=?,wc_status=?,payment_url=? WHERE id=?").run(String(result.id),result.status||"pending",result.payment_url||null,orderId);
       console.log(`WooCommerce order ${result.id} aangemaakt voor lokale order ${orderId}`);
