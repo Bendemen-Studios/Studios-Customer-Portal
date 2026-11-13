@@ -130,6 +130,7 @@ function addColumn(table, column, definition) {
 }
 addColumn("users", "active", "INTEGER NOT NULL DEFAULT 1");
 addColumn("recurring_orders", "last_generated_for", "TEXT");
+addColumn("recurring_orders", "manual_generation_token", "TEXT");
 addColumn("products", "cost_cents", "INTEGER NOT NULL DEFAULT 0");
 addColumn("users", "wc_customer_id", "TEXT");
 db.exec("UPDATE users SET active=0 WHERE role='customer' AND wc_customer_id IS NULL");
