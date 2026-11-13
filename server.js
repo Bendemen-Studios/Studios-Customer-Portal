@@ -98,11 +98,24 @@ async function syncWooOrder(orderId) {
     return result;
   } catch (err) { console.error(`WooCommerce order sync mislukt voor lokale order ${orderId}:`, err.message); return null; }
 }
-function renumberLocalOrders(){
- const rows=db.prepare("SELECT id FROM orders ORDER BY datetime(created_at),id").all();
- const update=db.prepare("UPDATE orders SET local_order_no=? WHERE id=?");
- db.transaction(()=>{rows.forEach((row,index)=>update.run(index+1,row.id));})();
+// Kies het laagste vrije SUPPLY-nummer. Bestaande nummers blijven altijd gekoppeld
+// aan hun order; verwijderde nummers vallen automatisch vrij voor hergebruik.
+function nextFreeSupplyOrderNo(){
+ const used=db.prepare("SELECT local_order_no FROM orders WHERE local_order_no IS NOT NULL ORDER BY local_order_no").all();
+ let candidate=1;
+ for(const row of used){
+  const number=Number(row.local_order_no);
+  if(number===candidate)candidate++;
+  else if(number>candidate)break;
+ }
+ return candidate;
 }
+function assignMissingSupplyOrderNumbers(){
+ const missing=db.prepare("SELECT id FROM orders WHERE local_order_no IS NULL ORDER BY datetime(created_at),id").all();
+ const assign=db.prepare("UPDATE orders SET local_order_no=? WHERE id=? AND local_order_no IS NULL");
+ db.transaction(()=>{for(const row of missing)assign.run(nextFreeSupplyOrderNo(),row.id);})();
+}
+assignMissingSupplyOrderNumbers();
 let orderCleanupRunning=false;
 async function syncDeletedWooOrders(){
  if(orderCleanupRunning)return;
@@ -119,8 +132,7 @@ async function syncDeletedWooOrders(){
     }else console.error("Order cleanup controle mislukt voor WooCommerce order "+row.wc_order_id+":",err.message);
    }
   }
-  renumberLocalOrders();
-  if(removed)console.log("WooCommerce sync: "+removed+" verwijderde order(s); nummers opnieuw opgebouwd.");
+  if(removed)console.log("WooCommerce sync: "+removed+" verwijderde WooCommerce-koppeling(en); SUPPLY-nummers zijn vrijgekomen voor hergebruik.");
  }catch(err){console.error("WooCommerce order cleanup:",err.message);}
  finally{orderCleanupRunning=false;}
 }
@@ -136,7 +148,7 @@ function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrder
   if(!Array.isArray(lines)||!lines.length) throw new Error("Deze bestelling bevat geen producten.");
   const total=lines.reduce((sum,x)=>sum+x.quantity*x.unit_price_cents,0);
   const tx=db.transaction(()=>{
-    const nextNo=db.prepare("SELECT COALESCE(MAX(local_order_no),0)+1 n FROM orders").get().n;
+    const nextNo=nextFreeSupplyOrderNo();
     const order=db.prepare("INSERT INTO orders (user_id,status,total_cents,source_order_id,notes,recurring_order_id,local_order_no) VALUES (?,'Nieuw',?,?,?,?,?)").run(userId,total,sourceOrderId,notes,recurringOrderId,nextNo);
     const insert=db.prepare("INSERT INTO order_items (order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)");
     for(const x of lines) insert.run(order.lastInsertRowid,x.product_id||null,x.product_name,x.quantity,x.unit_price_cents);
