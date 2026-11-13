@@ -80,7 +80,7 @@ function orderCard(o) {
   return `<div class="order-row"><div><strong>${esc(o.order_number)}</strong><small>${esc(o.date)}</small></div><div class="order-products">${esc(o.summary || "Geen orderregels")}</div><div><span class="status">${esc(displayOrderStatus(o))}</span></div><strong>${money(o.total_cents)}</strong><div class="row-actions"><a class="textlink" href="/orders/${o.id}">Bekijken →</a>${payment}</div></div>`;
 }
 function getOrders(userId, limit = 100) {
-  return db.prepare(`SELECT o.*, 'BDS-' || printf('%06d',o.id) order_number,
+  return db.prepare(`SELECT o.*, 'BDS-' || printf('%06d',COALESCE(o.local_order_no,o.id)) order_number,
     strftime('%d-%m-%Y',o.created_at) date,
     (SELECT group_concat(oi.quantity || '× ' || oi.product_name, ', ') FROM order_items oi WHERE oi.order_id=o.id) summary
     FROM orders o WHERE o.user_id=? AND (o.show_in_history=1 OR o.recurring_order_id IS NOT NULL) ORDER BY o.id DESC LIMIT ?`).all(userId, limit);
@@ -98,11 +98,37 @@ async function syncWooOrder(orderId) {
     return result;
   } catch (err) { console.error(`WooCommerce order sync mislukt voor lokale order ${orderId}:`, err.message); return null; }
 }
+function renumberLocalOrders(){
+ const rows=db.prepare("SELECT id FROM orders ORDER BY datetime(created_at),id").all();
+ const update=db.prepare("UPDATE orders SET local_order_no=? WHERE id=?");
+ db.transaction(()=>{rows.forEach((row,index)=>update.run(index+1,row.id));})();
+}
+let orderCleanupRunning=false;
+async function syncDeletedWooOrders(){
+ if(orderCleanupRunning)return;
+ orderCleanupRunning=true;
+ try{
+  const linked=db.prepare("SELECT id,wc_order_id FROM orders WHERE wc_order_id IS NOT NULL AND wc_order_id != '' ORDER BY id").all();
+  let removed=0;
+  for(const row of linked){
+   try{await woo.getOrder(row.wc_order_id);}
+   catch(err){
+    if(err.response && err.response.status===404){
+     db.prepare("DELETE FROM orders WHERE id=? AND wc_order_id=?").run(row.id,row.wc_order_id);
+     removed++;
+    }else console.error("Order cleanup controle mislukt voor WooCommerce order "+row.wc_order_id+":",err.message);
+   }
+  }
+  renumberLocalOrders();
+  if(removed)console.log("WooCommerce sync: "+removed+" verwijderde order(s); nummers opnieuw opgebouwd.");
+ }catch(err){console.error("WooCommerce order cleanup:",err.message);}
+ finally{orderCleanupRunning=false;}
+}
 async function sendOrderWebhook(orderId) {
   const url = process.env.ORDER_WEBHOOK_URL; if (!url) return;
   const o = db.prepare(`SELECT o.*,u.name customer_name,u.email customer_email FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=?`).get(orderId);
   const items = orderItems(orderId).map(i => ({ productName: i.product_name, quantity: i.quantity, unitPriceCents: i.unit_price_cents }));
-  const payload = { event:"order.created", order:{id:o.id,orderNumber:`BDS-${String(o.id).padStart(6,"0")}`,customer:{id:o.user_id,name:o.customer_name,email:o.customer_email},items,totalCents:o.total_cents,currency:o.currency,status:o.status,createdAt:o.created_at} };
+  const payload = { event:"order.created", order:{id:o.id,orderNumber:`BDS-${String(o.local_order_no||o.id).padStart(6,"0")}`,customer:{id:o.user_id,name:o.customer_name,email:o.customer_email},items,totalCents:o.total_cents,currency:o.currency,status:o.status,createdAt:o.created_at} };
   try { const headers={"content-type":"application/json"}; if(process.env.ORDER_WEBHOOK_TOKEN) headers.authorization=`Bearer ${process.env.ORDER_WEBHOOK_TOKEN}`; const response=await fetch(url,{method:"POST",headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(Math.max(5000,Math.min(120000,Number(process.env.ORDER_WEBHOOK_TIMEOUT_MS)||20000)))}); if(!response.ok) console.error(`Order webhook HTTP ${response.status}`); }
   catch(err){console.error("Order webhook failed:",err.message);}
 }
@@ -110,7 +136,8 @@ function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrder
   if(!Array.isArray(lines)||!lines.length) throw new Error("Deze bestelling bevat geen producten.");
   const total=lines.reduce((sum,x)=>sum+x.quantity*x.unit_price_cents,0);
   const tx=db.transaction(()=>{
-    const order=db.prepare("INSERT INTO orders (user_id,status,total_cents,source_order_id,notes,recurring_order_id) VALUES (?,'Nieuw',?,?,?,?)").run(userId,total,sourceOrderId,notes,recurringOrderId);
+    const nextNo=db.prepare("SELECT COALESCE(MAX(local_order_no),0)+1 n FROM orders").get().n;
+    const order=db.prepare("INSERT INTO orders (user_id,status,total_cents,source_order_id,notes,recurring_order_id,local_order_no) VALUES (?,'Nieuw',?,?,?,?,?)").run(userId,total,sourceOrderId,notes,recurringOrderId,nextNo);
     const insert=db.prepare("INSERT INTO order_items (order_id,product_id,product_name,quantity,unit_price_cents) VALUES (?,?,?,?,?)");
     for(const x of lines) insert.run(order.lastInsertRowid,x.product_id||null,x.product_name,x.quantity,x.unit_price_cents);
     return Number(order.lastInsertRowid);
@@ -259,7 +286,7 @@ app.get("/orders/:id",requireAuth,async(req,res)=>{
   const payBlock=fresh.payment_url&&!["processing","completed","refunded","cancelled"].includes(fresh.wc_status)?`<div class="payment-box"><div><strong>Deze bestelling staat nog open</strong><p>Betaal veilig via de betaalpagina van Bendemen Studios.</p></div><a class="primary" href="/orders/${id}/pay">Nu betalen <span>→</span></a></div>`:(fresh.wc_status?`<p class="hint">WooCommerce-status: ${esc(displayOrderStatus(fresh))}</p>`:'<p class="hint">De WooCommerce-betaallink verschijnt zodra de winkelkoppeling is ingesteld.</p>');
   const cancelBlock=canCancel?`<form method="post" action="/orders/${id}/cancel" class="cancel-box"><div><strong>Bestelling annuleren</strong><p>Dit kan zolang de bestelling nog niet in behandeling is genomen.</p></div><button class="danger">Bestelling annuleren</button></form>`:"";
   const invoiceBlock=fresh.wc_order_id&&["pending","on-hold","processing","completed","refunded"].includes(fresh.wc_status)?`<p class="invoice-action"><a class="secondary" href="/orders/${id}/invoice" target="_blank" rel="noopener">Factuur downloaden (PDF) →</a></p>`:"";
-  res.send(page(req,"Bestelling",`<a class="back" href="/orders">← Terug naar bestellingen</a><div class="page-title"><div class="eyebrow">BESTELLING BDS-${String(id).padStart(6,"0")}${fresh.wc_order_id?` · WC #${fresh.wc_order_id}`:""}</div><h1>Bestelling bekijken</h1><p>Aangemaakt op ${esc(o.created_at)} · <span class="status">${esc(displayOrderStatus(fresh))}</span></p></div>${payBlock}${cancelBlock}${invoiceBlock}<div class="panel"><div class="table-wrap"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th><th>Totaal</th></tr></thead><tbody>${rows}</tbody></table></div><div class="total-line"><span>Ordertotaal</span><strong>${money(o.total_cents)}</strong></div></div>${fresh.allow_reorder!==0?`<form method="post" action="/orders/${id}/reorder" class="reorder-form"><div><strong>Dit product opnieuw bestellen?</strong><p>We maken direct een nieuwe order aan met dezelfde producten en aantallen.</p></div><button class="primary">Opnieuw bestellen <span>→</span></button></form>`:`<p class="hint">Dit is een maatwerkbestelling. Opnieuw bestellen is voor deze bestelling uitgeschakeld.</p>`}`));
+  res.send(page(req,"Bestelling",`<a class="back" href="/orders">← Terug naar bestellingen</a><div class="page-title"><div class="eyebrow">BESTELLING BDS-${String(o.local_order_no||id).padStart(6,"0")}${fresh.wc_order_id?` · WC #${fresh.wc_order_id}`:""}</div><h1>Bestelling bekijken</h1><p>Aangemaakt op ${esc(o.created_at)} · <span class="status">${esc(displayOrderStatus(fresh))}</span></p></div>${payBlock}${cancelBlock}${invoiceBlock}<div class="panel"><div class="table-wrap"><table><thead><tr><th>Product</th><th>Aantal</th><th>Prijs per stuk</th><th>Totaal</th></tr></thead><tbody>${rows}</tbody></table></div><div class="total-line"><span>Ordertotaal</span><strong>${money(o.total_cents)}</strong></div></div>${fresh.allow_reorder!==0?`<form method="post" action="/orders/${id}/reorder" class="reorder-form"><div><strong>Dit product opnieuw bestellen?</strong><p>We maken direct een nieuwe order aan met dezelfde producten en aantallen.</p></div><button class="primary">Opnieuw bestellen <span>→</span></button></form>`:`<p class="hint">Dit is een maatwerkbestelling. Opnieuw bestellen is voor deze bestelling uitgeschakeld.</p>`}`));
 });
 app.get("/orders/:id/pay",requireAuth,(req,res)=>{
   const id=Number(req.params.id),order=db.prepare("SELECT id,payment_url,wc_status,workflow_status FROM orders WHERE id=? AND user_id=?").get(id,req.session.user.id);
@@ -307,7 +334,7 @@ app.get("/admin/orders",requireAuth,requireAdmin,(req,res)=>{
  (SELECT group_concat(oi.quantity || '× ' || oi.product_name, ', ') FROM order_items oi WHERE oi.order_id=o.id) summary
  FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.id DESC LIMIT 500`).all();
  const body='<a class="back" href="/admin">← Beheer</a><div class="page-title"><div class="eyebrow">BEHEER</div><h1>Orderoverzicht</h1><p>Lokale bestellingen en hun WooCommerce-koppeling.</p></div><div class="panel table-wrap"><table><thead><tr><th>Lokale order</th><th>Klant</th><th>Producten</th><th>Datum</th><th>Bedrag</th><th>WooCommerce</th></tr></thead><tbody>'+
- (rows.map(o=>'<tr><td><strong>BDS-'+String(o.id).padStart(6,'0')+'</strong></td><td>'+esc(o.customer_name)+'<small>'+esc(o.customer_email)+'</small></td><td>'+esc(o.summary||'Geen orderregels')+'</td><td>'+esc(o.created_at)+'</td><td>'+money(o.total_cents)+'</td><td>'+(o.wc_order_id?'#'+esc(o.wc_order_id)+' · '+esc(o.wc_status||'Onbekend'):'Niet gekoppeld')+'</td></tr>').join('')||'<tr><td colspan="6">Nog geen bestellingen.</td></tr>')+
+ (rows.map(o=>'<tr><td><strong>BDS-'+String(o.local_order_no||o.id).padStart(6,'0')+'</strong></td><td>'+esc(o.customer_name)+'<small>'+esc(o.customer_email)+'</small></td><td>'+esc(o.summary||'Geen orderregels')+'</td><td>'+esc(o.created_at)+'</td><td>'+money(o.total_cents)+'</td><td>'+(o.wc_order_id?'#'+esc(o.wc_order_id)+' · '+esc(o.wc_status||'Onbekend'):'Niet gekoppeld')+'</td></tr>').join('')||'<tr><td colspan="6">Nog geen bestellingen.</td></tr>')+
  '</tbody></table></div><p class="hint">Toont de laatste 500 lokale bestellingen.</p>';
  res.send(page(req,"Orderoverzicht",body));
 });
@@ -504,4 +531,6 @@ async function processRecurringOrders(){
 }
 setTimeout(()=>processRecurringOrders().catch(err=>console.error("Recurring scheduler:",err.message)),5000);
 setInterval(()=>processRecurringOrders().catch(err=>console.error("Recurring scheduler:",err.message)),60000).unref();
+setTimeout(()=>syncDeletedWooOrders(),15000).unref();
+setInterval(()=>syncDeletedWooOrders(),300000).unref();
 app.listen(PORT, "0.0.0.0", ()=>console.log(`Bendemen Supply Panel draait op poort ${PORT}`));
