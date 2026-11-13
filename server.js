@@ -108,7 +108,7 @@ app.post("/login",loginLimiter,async(req,res)=>{
   const email=String(req.body.email||"").trim().toLowerCase();
   const password=String(req.body.password||"");
   const user=db.prepare("SELECT * FROM users WHERE email=? COLLATE NOCASE").get(email);
-  if(!user||user.active!==1||!["admin","customer"].includes(user.role)||!(await bcrypt.compare(password,user.password_hash)))return res.redirect("/login?error=1");
+  if(!user||user.active!==1||!["admin","customer"].includes(user.role)||(user.role==="customer"&&!user.wc_customer_id)||!(await bcrypt.compare(password,user.password_hash)))return res.redirect("/login?error=1");
   req.session.regenerate(err=>{if(err)return res.status(500).send("Sessie kon niet worden gestart.");req.session.user={id:user.id,name:user.name,email:user.email,role:user.role};res.redirect(user.role==="admin"?"/admin":"/");});
 });
 app.post("/logout",requireAuth,(req,res)=>req.session.destroy(()=>res.redirect("/login")));
