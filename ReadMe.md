@@ -1,4 +1,4 @@
-# Bendemen Studios Customer Portal
+# Bendemen Supply Panel
 
 De applicatiebestanden staan rechtstreeks in de hoofdmap van deze repository. Gebruik de hoofdmap als projectmap in Pterodactyl.
 
