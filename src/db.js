@@ -7,6 +7,10 @@ const dbPath = process.env.DB_PATH || "./data/bendemen.sqlite";
 fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
+db.pragma("synchronous = NORMAL");
+db.pragma("temp_store = MEMORY");
+db.pragma("cache_size = -20000"); // circa 20 MB SQLite page cache
+db.pragma("mmap_size = 268435456"); // maximaal 256 MB memory-mapped database
 db.pragma("foreign_keys = ON");
 
 db.exec(`
@@ -144,7 +148,7 @@ db.exec("UPDATE orders SET show_in_history=1 WHERE allow_reorder=0 AND notes LIK
 addColumn("monthly_costs", "interval", "TEXT NOT NULL DEFAULT 'month'");
 addColumn("monthly_costs", "wc_order_id", "TEXT");
 addColumn("monthly_costs", "notes", "TEXT");
-db.exec("CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, id DESC); CREATE INDEX IF NOT EXISTS idx_products_active ON products(active); CREATE INDEX IF NOT EXISTS idx_recurring_user ON recurring_orders(user_id);");
+db.exec("CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, id DESC); CREATE INDEX IF NOT EXISTS idx_orders_history ON orders(user_id, show_in_history, id DESC); CREATE INDEX IF NOT EXISTS idx_products_active ON products(active); CREATE INDEX IF NOT EXISTS idx_recurring_user ON recurring_orders(user_id); CREATE INDEX IF NOT EXISTS idx_recurring_due ON recurring_orders(status, next_payment); CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);");
 
 db.exec("DROP TABLE IF EXISTS magic_login_tokens");
 const insertAdmin = db.prepare(`INSERT INTO users (name,email,password_hash,role,active)
