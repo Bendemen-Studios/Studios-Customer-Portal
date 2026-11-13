@@ -305,6 +305,7 @@ app.post("/admin/customers/link",requireAuth,requireAdmin,async(req,res)=>{
  try{
   const c=await woo.getCustomer(wcId),email=String(c.email||"").trim().toLowerCase(),name=[c.first_name,c.last_name].filter(Boolean).join(" ")||email;
   if(!email||email.indexOf("@")<1)return res.status(400).send("Deze WooCommerce-klant heeft geen geldig e-mailadres.");
+  await woo.setCustomerPassword(wcId,password);
   const hash=await bcrypt.hash(password,12),existing=db.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE").get(email);
   if(existing)db.prepare("UPDATE users SET name=?,password_hash=?,role='customer',active=1,wc_customer_id=? WHERE id=?").run(name,hash,wcId,existing.id);
   else db.prepare("INSERT INTO users (name,email,password_hash,role,active,wc_customer_id) VALUES (?,?,?,'customer',1,?)").run(name,email,hash,wcId);
