@@ -123,6 +123,8 @@ function addColumn(table, column, definition) {
 }
 addColumn("users", "active", "INTEGER NOT NULL DEFAULT 1");
 addColumn("users", "wc_customer_id", "TEXT");
+db.exec("UPDATE users SET active=0 WHERE role='customer' AND wc_customer_id IS NULL");
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_wc_customer ON users(wc_customer_id) WHERE wc_customer_id IS NOT NULL");
 addColumn("orders", "workflow_status", "TEXT DEFAULT 'started'");
 addColumn("orders", "wc_order_id", "TEXT");
 addColumn("orders", "wc_status", "TEXT");
