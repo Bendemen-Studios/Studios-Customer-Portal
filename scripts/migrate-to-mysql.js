@@ -47,7 +47,12 @@ function digestRows(rows, columns) {
     const values = columns.map(column => {
       const value = row[column.name];
       if (Buffer.isBuffer(value)) return { buffer: value.toString("base64") };
-      return value === undefined ? null : value;
+      if (value === undefined || value === null) return null;
+      if (/INT|REAL|FLOA|DOUB|NUMERIC|DECIMAL/i.test(String(column.type || ""))) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : String(value);
+      }
+      return value;
     });
     hash.update(JSON.stringify(values) + "\n");
   }
@@ -153,7 +158,10 @@ async function main() {
       }
 
       for (const index of indexes) {
-        if (index.origin === "pk" || index.partial) continue;
+        if (index.origin === "pk") continue;
+        // MySQL has no partial indexes. For this schema's partial unique index
+        // on wc_customer_id, a normal UNIQUE index is equivalent because NULLs
+        // are allowed more than once in MySQL.
         const indexColumns = sqlite.prepare("PRAGMA index_info(" + quote(index.name) + ")").all();
         if (!indexColumns.length) continue;
         const indexName = "mig_" + table + "_" + index.name;
