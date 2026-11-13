@@ -64,7 +64,7 @@ const money = euro;
 function page(req, title, body) {
   const user = req.session.user;
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · Bendemen Studios</title><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="stylesheet" href="/style.css"></head><body>
-  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/services">Diensten & kosten</a>${user.role === "admin" ? '<a href="/admin">Beheer</a><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
+  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/bendemen-logo.png" alt="Bendemen Studios"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/services">Diensten & kosten</a><a href="/account/password">Wachtwoord</a>${user.role === "admin" ? '<a href="/admin">Beheer</a><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a>' : ''}</nav><div class="account"><span>${esc(user.name)}</span><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
   <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Bendemen Supply Panel</span></footer></body></html>`;
 }
 function moneyInput(value) { return Math.round(Number(String(value).replace(",", ".")) * 100); }
@@ -215,6 +215,23 @@ app.post("/login",loginLimiter,async(req,res)=>{
   if(!user||user.active!==1||!["admin","customer"].includes(user.role)||(user.role==="customer"&&!user.wc_customer_id)||!(await bcrypt.compare(password,user.password_hash)))return res.redirect("/login?error=1");
   req.session.regenerate(err=>{if(err)return res.status(500).send("Sessie kon niet worden gestart.");req.session.user={id:user.id,name:user.name,email:user.email,role:user.role};res.redirect(user.role==="admin"?"/admin":"/");});
 });
+app.get("/account/password",requireAuth,(req,res)=>{
+ const body='<div class="page-title"><div class="eyebrow">ACCOUNT</div><h1>Wachtwoord wijzigen</h1><p>Je nieuwe wachtwoord wordt ook met WooCommerce gesynchroniseerd.</p>'+(req.query.updated?'<div class="alert">Wachtwoord succesvol gewijzigd in beide systemen.</div>':'')+'</div><div class="panel"><form method="post" action="/account/password" class="stack"><label>Huidig wachtwoord<input name="current_password" type="password" autocomplete="current-password" required></label><label>Nieuw wachtwoord<input name="new_password" type="password" minlength="6" maxlength="200" autocomplete="new-password" required></label><label>Herhaal nieuw wachtwoord<input name="confirm_password" type="password" minlength="6" maxlength="200" autocomplete="new-password" required></label><button class="primary">Wachtwoord wijzigen</button></form></div>';
+ res.send(page(req,"Wachtwoord wijzigen",body));
+});
+app.post("/account/password",requireAuth,async(req,res)=>{
+ const user=db.prepare("SELECT * FROM users WHERE id=? AND active=1").get(req.session.user.id);
+ const current=String(req.body.current_password||""),next=String(req.body.new_password||""),confirm=String(req.body.confirm_password||"");
+ if(!user||!(await bcrypt.compare(current,user.password_hash)))return res.status(400).send("Het huidige wachtwoord is onjuist.");
+ if(next.length<6||next.length>200||next!==confirm)return res.status(400).send("Het nieuwe wachtwoord moet minimaal 6 tekens bevatten en beide velden moeten overeenkomen.");
+ try{
+  if(user.role==="customer"&&user.wc_customer_id)await woo.setCustomerPassword(user.wc_customer_id,next);
+  const hash=await bcrypt.hash(next,12);
+  db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(hash,user.id);
+  res.redirect("/account/password?updated=1");
+ }catch(err){console.error("Password sync failed:",err.message);res.status(502).send("Wachtwoord synchroniseren met WooCommerce is mislukt. Je oude wachtwoord blijft actief.");
+ }
+});
 app.post("/logout",requireAuth,(req,res)=>req.session.destroy(()=>res.redirect("/login")));
 
 app.get("/",requireAuth,(req,res)=>{
@@ -278,13 +295,13 @@ app.get("/admin/customers/search",requireAuth,requireAdmin,async(req,res)=>{
  const rows=customers.map(c=>{
   const email=String(c.email||"").trim().toLowerCase(),name=[c.first_name,c.last_name].filter(Boolean).join(" ")||email;
   const existing=email?db.prepare("SELECT id,wc_customer_id FROM users WHERE email=? COLLATE NOCASE").get(email):null;
-  return '<div class="order-row"><div><strong>'+esc(name)+'</strong><small>'+esc(email)+'</small></div><div>WooCommerce #'+esc(c.id)+'</div><div>'+(existing?(existing.wc_customer_id?'Al gekoppeld':'Supply-account bestaat'):'Nog geen Supply-account')+'</div><form method="post" action="/admin/customers/link" class="stack"><input type="hidden" name="wc_customer_id" value="'+esc(c.id)+'"><label>Startwachtwoord<input name="password" type="password" minlength="12" maxlength="200" required placeholder="Minimaal 12 tekens"></label><button class="primary">'+(existing?'Account koppelen / herstellen':'Toegang geven')+'</button></form></div>';
+  return '<div class="order-row"><div><strong>'+esc(name)+'</strong><small>'+esc(email)+'</small></div><div>WooCommerce #'+esc(c.id)+'</div><div>'+(existing?(existing.wc_customer_id?'Al gekoppeld':'Supply-account bestaat'):'Nog geen Supply-account')+'</div><form method="post" action="/admin/customers/link" class="stack"><input type="hidden" name="wc_customer_id" value="'+esc(c.id)+'"><label>Startwachtwoord<input name="password" type="password" minlength="6" maxlength="200" required placeholder="Minimaal 6 tekens"></label><button class="primary">'+(existing?'Account koppelen / herstellen':'Toegang geven')+'</button></form></div>';
  }).join("");
  res.send(page(req,"Klant toevoegen",'<div class="page-title"><div class="eyebrow">WOOCOMMERCE</div><h1>Klant toevoegen</h1><p>Zoek een geregistreerde WooCommerce-klant op naam of e-mailadres.</p></div><div class="panel"><form method="get" action="/admin/customers/search" class="stack"><label>Naam of e-mailadres<input name="q" value="'+esc(q)+'" minlength="2" required placeholder="Naam of e-mailadres"></label><button class="primary">Zoeken in WooCommerce</button></form></div>'+(error?'<div class="alert">'+esc(error)+'</div>':'')+'<div class="panel">'+(q.length<2?'<div class="empty">Vul minimaal twee tekens in.</div>':rows||'<div class="empty">Geen WooCommerce-klanten gevonden.</div>')+'</div><a class="back" href="/admin">← Terug naar klanten</a>'));
 });
 app.post("/admin/customers/link",requireAuth,requireAdmin,async(req,res)=>{
  const wcId=String(req.body.wc_customer_id||"").trim(),password=String(req.body.password||"");
- if(!/^\\d+$/.test(wcId)||password.length<12||password.length>200)return res.status(400).send("Ongeldig account of wachtwoord (minimaal 12 tekens).");
+ if(!/^\\d+$/.test(wcId)||password.length<6||password.length>200)return res.status(400).send("Ongeldig account of wachtwoord (minimaal 6 tekens).");
  try{
   const c=await woo.getCustomer(wcId),email=String(c.email||"").trim().toLowerCase(),name=[c.first_name,c.last_name].filter(Boolean).join(" ")||email;
   if(!email||email.indexOf("@")<1)return res.status(400).send("Deze WooCommerce-klant heeft geen geldig e-mailadres.");
