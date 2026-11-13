@@ -124,7 +124,7 @@ async function syncDeletedWooOrders(){
   const linked=db.prepare("SELECT id,wc_order_id FROM orders WHERE wc_order_id IS NOT NULL AND wc_order_id != '' ORDER BY id").all();
   let removed=0;
   for(const row of linked){
-   try{await woo.getOrder(row.wc_order_id);}
+   try{const wcOrder=await woo.getOrder(row.wc_order_id);if(wcOrder?.number!=null)db.prepare("UPDATE orders SET wc_order_number=? WHERE id=?").run(String(wcOrder.number),row.id);}
    catch(err){
     if(err.response && err.response.status===404){
      db.prepare("DELETE FROM orders WHERE id=? AND wc_order_id=?").run(row.id,row.wc_order_id);
