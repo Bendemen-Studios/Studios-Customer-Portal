@@ -37,8 +37,14 @@ app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.urlencoded({ extended: false, limit: "32kb" }));
 app.use(express.json({ limit: "32kb" }));
+class SQLiteSessionStore extends session.Store {
+ get(sid,callback){try{const row=db.prepare("SELECT data FROM sessions WHERE sid=? AND expires_at>?").get(sid,Date.now());callback(null,row?JSON.parse(row.data):null);}catch(err){callback(err);}}
+ set(sid,sess,callback){try{const expires=sess.cookie&&sess.cookie.expires?new Date(sess.cookie.expires).getTime():Date.now()+86400000;db.prepare("INSERT INTO sessions(sid,data,expires_at) VALUES(?,?,?) ON CONFLICT(sid) DO UPDATE SET data=excluded.data,expires_at=excluded.expires_at").run(sid,JSON.stringify(sess),expires);callback&&callback(null);}catch(err){callback&&callback(err);}}
+ destroy(sid,callback){try{db.prepare("DELETE FROM sessions WHERE sid=?").run(sid);callback&&callback(null);}catch(err){callback&&callback(err);}}
+ touch(sid,sess,callback){try{const expires=sess.cookie&&sess.cookie.expires?new Date(sess.cookie.expires).getTime():Date.now()+86400000;db.prepare("UPDATE sessions SET expires_at=? WHERE sid=?").run(expires,sid);callback&&callback(null);}catch(err){callback&&callback(err);}}
+}
 app.use(session({
-  name: "bendemen.sid", secret: process.env.SESSION_SECRET || "development-only-change-this-secret",
+  store: new SQLiteSessionStore(), name: "bendemen.sid", secret: process.env.SESSION_SECRET || "development-only-change-this-secret",
   resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 8 * 60 * 60 * 1000 }
 }));
@@ -294,6 +300,33 @@ app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>res.redirect("/admin/
 
 app.get("/health",(_req,res)=>res.json({ok:true}));
 app.use((err,req,res,next)=>{console.error(err);res.status(500).send("Er is iets misgegaan.");});
+function addBillingPeriod(dateString,interval){
+ const date=new Date(dateString+"T12:00:00.000Z");
+ if(interval==="week")date.setUTCDate(date.getUTCDate()+7);
+ else if(interval==="year")date.setUTCFullYear(date.getUTCFullYear()+1);
+ else {const day=date.getUTCDate();date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()+1);const last=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,0)).getUTCDate();date.setUTCDate(Math.min(day,last));}
+ return date.toISOString().slice(0,10);
+}
+async function processRecurringOrders(){
+ const today=new Date().toISOString().slice(0,10);
+ const due=db.prepare("SELECT * FROM recurring_orders WHERE status='active' AND next_payment IS NOT NULL AND next_payment<=? AND (last_generated_for IS NULL OR last_generated_for<next_payment) ORDER BY id").all(today);
+ for(const sub of due){
+  const items=db.prepare("SELECT * FROM recurring_order_items WHERE recurring_order_id=?").all(sub.id);
+  if(!items.length){console.warn("Terugkerende bestelling "+sub.id+" overgeslagen: geen orderregels.");continue;}
+  try{
+   const tx=db.transaction(()=>{
+    const current=db.prepare("SELECT * FROM recurring_orders WHERE id=? AND status='active' AND next_payment=? AND (last_generated_for IS NULL OR last_generated_for<next_payment)").get(sub.id,sub.next_payment);
+    if(!current)return null;
+    const lines=items.map(x=>({product_id:x.product_id,product_name:x.product_name,quantity:x.quantity,unit_price_cents:x.unit_price_cents}));
+    const id=createOrder(current.user_id,lines,null,"Automatisch terugkerende bestelling: "+current.name,current.id);
+    db.prepare("UPDATE recurring_orders SET last_generated_for=?,next_payment=? WHERE id=?").run(current.next_payment,addBillingPeriod(current.next_payment,current.interval),current.id);
+    return id;
+   });
+   const orderId=tx();
+   if(orderId){await syncWooOrder(orderId);await sendOrderWebhook(orderId);console.log("Terugkerende bestelling aangemaakt:",orderId);}
+  }catch(err){console.error("Terugkerende bestelling mislukt voor "+sub.id+":",err.message);}
+ }
+}
 setTimeout(()=>processRecurringOrders().catch(err=>console.error("Recurring scheduler:",err.message)),5000);
 setInterval(()=>processRecurringOrders().catch(err=>console.error("Recurring scheduler:",err.message)),60000).unref();
 app.listen(PORT, "0.0.0.0", ()=>console.log(`Bendemen Supply Panel draait op poort ${PORT}`));
