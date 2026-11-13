@@ -42,6 +42,13 @@ add_action('rest_api_init', function () {
       if (!$order) return new WP_Error('not_found', 'WooCommerce order not found.', array('status' => 404));
 
       try {
+        // Mark the existing order as a Supply Panel order too. This also repairs
+        // orders created before the invoice bridge metadata was added.
+        if ((string) $order->get_meta('_bendemen_supply_panel_order') !== '1') {
+          $order->update_meta_data('_bendemen_supply_panel_order', '1');
+          $order->save();
+        }
+
         // init=true creates and saves the invoice number/document if it does not exist yet.
         $document = wcpdf_get_document('invoice', $order, true);
         if (!$document) {
