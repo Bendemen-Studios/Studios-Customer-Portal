@@ -14,10 +14,10 @@ const sqlitePath = path.resolve(process.env.DB_PATH || "./data/bendemen.sqlite")
 const sqlite = new Database(sqlitePath, { readonly: true, fileMustExist: true });
 const quote = value => "\`" + String(value).replace(/\`/g, "\`\`") + "\`";
 
-function mysqlType(column, indexedColumns) {
+function mysqlType(column, indexedColumns, useAutoIncrement) {
   const name = column.name;
   const type = String(column.type || "").toUpperCase();
-  if (column.pk && type.includes("INT")) return "BIGINT NOT NULL AUTO_INCREMENT";
+  if (column.pk && useAutoIncrement && type.includes("INT")) return "BIGINT NOT NULL AUTO_INCREMENT";
   if (column.pk && !type.includes("INT")) return "VARCHAR(255) NOT NULL";
   if (/INT/.test(type)) return "BIGINT";
   if (/REAL|FLOA|DOUB/.test(type)) return "DOUBLE";
@@ -83,6 +83,7 @@ async function main() {
 
     const report = [];
     for (const table of tables) {
+      try {
       const columns = sqlite.prepare("PRAGMA table_info(" + quote(table) + ")").all();
       if (!columns.length) continue;
 
@@ -95,20 +96,18 @@ async function main() {
       }
 
       const foreignKeys = sqlite.prepare("PRAGMA foreign_key_list(" + quote(table) + ")").all();
+      const primaryKey = columns.filter(column => column.pk).sort((a, b) => a.pk - b.pk);
+      const autoIncrementColumn = primaryKey.length === 1 && String(primaryKey[0].type).toUpperCase().includes("INT")
+        ? primaryKey[0] : null;
       const definitions = columns.map(column => {
-        const type = mysqlType(column, indexedColumns);
+        const type = mysqlType(column, indexedColumns, column === autoIncrementColumn);
         const notNull = column.notnull && !column.pk ? " NOT NULL" : "";
         const defaultValue = column.pk ? "" : safeDefault(column.dflt_value, column);
         return quote(column.name) + " " + type + notNull + defaultValue;
       });
 
-      const primaryKey = columns.filter(column => column.pk).sort((a, b) => a.pk - b.pk);
-      if (primaryKey.length > 1) {
+      if (primaryKey.length) {
         definitions.push("PRIMARY KEY (" + primaryKey.map(column => quote(column.name)).join(",") + ")");
-        for (const column of primaryKey) {
-          const position = definitions.findIndex(definition => definition.startsWith(quote(column.name) + " "));
-          definitions[position] = definitions[position].replace(" NOT NULL AUTO_INCREMENT", " NOT NULL");
-        }
       }
 
       for (const fk of foreignKeys) {
@@ -129,10 +128,19 @@ async function main() {
       const [targetRows] = await connection.query("SELECT COUNT(*) AS total FROM " + quote(table));
       const existingCount = Number(targetRows[0].total);
       if (existingCount !== 0) {
-        throw new Error(
-          "Doeltabel " + table + " bevat al " + existingCount +
-          " rijen. Migratie is afgebroken zonder bestaande data te overschrijven. Gebruik een lege database."
-        );
+        const orderBy = primaryKey.length
+          ? primaryKey.map(column => quote(column.name)).join(",")
+          : quote(columns[0].name);
+        const [existingData] = await connection.query("SELECT * FROM " + quote(table) + " ORDER BY " + orderBy);
+        if (existingCount !== sourceRows.length ||
+            digestRows(existingData, columns) !== digestRows(sourceRows, columns)) {
+          throw new Error(
+            "Doeltabel " + table + " bevat al gegevens die afwijken van SQLite. " +
+            "Er is niets overschreven; herstel de MySQL-doeldatabase of gebruik een lege database."
+          );
+        }
+        report.push({ table, rows: sourceRows.length, status: "bestond al en is geverifieerd" });
+        continue;
       }
 
       if (sourceRows.length) {
@@ -191,13 +199,15 @@ async function main() {
         throw new Error("Inhoudscontrole mislukt voor " + table + "; SQLite blijft ongewijzigd.");
       }
 
-      const autoIncrementColumn = columns.find(column => column.pk && String(column.type).toUpperCase().includes("INT"));
       if (autoIncrementColumn && sourceRows.length) {
         const maxId = Math.max(...sourceRows.map(row => Number(row[autoIncrementColumn.name]) || 0));
         if (maxId > 0) await connection.query("ALTER TABLE " + quote(table) + " AUTO_INCREMENT = " + (maxId + 1));
       }
 
       report.push({ table, rows: sourceRows.length, sha256: sourceDigest, status: "geverifieerd" });
+      } catch (error) {
+        throw new Error("Tabel " + table + ": " + error.message);
+      }
     }
 
     console.log(JSON.stringify({
