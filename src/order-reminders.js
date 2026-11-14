@@ -2,7 +2,7 @@
 
 function shiftDate(dateString, days) {
  const value=String(dateString||"");
- if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)||!Number.isInteger(days)) {
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isInteger(days)) {
   throw new Error("Ongeldige datum of dagverschuiving.");
  }
  const date=new Date(value+"T12:00:00.000Z");
