@@ -219,7 +219,7 @@ async function sendLoggedMail({type,to,orderId=null,daysBefore=null,orderDate=nu
   const scheduledDate=effectiveDays?(orderDate||shiftDate(businessDate(),effectiveDays)):null;
   const subject=mailSubject(type,order)+(isTest?" (test)":"");
   const inserted=db.prepare(
-    "INSERT INTO mail_logs (email_type,order_id,recipient,subject,status,is_test,days_before,order_date,parent_log_id) VALUES (?,?,?,?,'sending',?,?,?,?,?)"
+    "INSERT INTO mail_logs (email_type,order_id,recipient,subject,status,is_test,days_before,order_date,parent_log_id) VALUES (?,?,?,?,'sending',?,?,?,?)"
   ).run(type,isTest?null:orderId,recipient,subject,isTest?1:0,effectiveDays,scheduledDate,parentLogId);
   const logId=Number(inserted.lastInsertRowid);
   try {
@@ -375,7 +375,7 @@ app.get("/admin/mail",requireAuth,requireAdmin,(req,res)=>{
   const orderLabel=log.order_id?"SUPPLY-"+(db.prepare("SELECT COALESCE(local_order_no,id) n FROM orders WHERE id=?").get(log.order_id)?.n||log.order_id):(log.is_test?"Testmail":"—");
   return '<tr><td>'+esc(log.created_at)+'</td><td>'+esc(mailTypeLabel(log.email_type))+(log.is_test?' <span class="mail-tag">TEST</span>':'')+'</td><td>'+esc(log.recipient)+'</td><td>'+esc(orderLabel)+'</td><td><span class="mail-status mail-'+esc(log.status)+'">'+esc(status)+'</span></td><td>'+esc(log.sent_at||'—')+'</td><td>'+(log.error?'<span class="mail-error" title="'+esc(log.error)+'">'+esc(log.error)+'</span>':'—')+'</td><td><form method="post" action="/admin/mail/'+log.id+'/resend" onsubmit="return confirm(\'Deze e-mail opnieuw versturen naar '+esc(log.recipient)+'?\')"><button class="secondary">Opnieuw versturen</button></form></td></tr>';
  }).join("");
- const notice=req.query.sent?'<div class="success">Testmail is verzonden.</div>':req.query.failed?'<div class="alert">Verzending mislukt. Bekijk de foutmelding in het logboek.</div>':"";
+ const notice=(req.query.sent||req.query.resent)?'<div class="success">E-mail is succesvol verzonden.</div>':req.query.failed?'<div class="alert">Verzending mislukt. Bekijk de foutmelding in het logboek.</div>':"";
  const body='<a class="back" href="/admin">← Beheer</a><div class="page-title"><div class="eyebrow">BEHEER</div><h1>Mail logs</h1><p>Controleer e-mailverzendingen, test alle templates en verstuur een eerder bericht opnieuw.</p></div>'+notice+
  '<div class="panel"><h2>Testmail versturen</h2><p>De test wordt naar het ingevulde adres gestuurd en gebruikt voorbeeldgegevens. Er wordt geen echte bestelling aangemaakt.</p><form method="post" action="/admin/mail/test" class="stack"><label>Type e-mail<select name="email_type" required><option value="new_order">Nieuwe bestelling (met PDF-bijlage)</option><option value="reminder_7">Herinnering 7 dagen</option><option value="reminder_3">Herinnering 3 dagen</option></select></label><label>Ontvanger<input name="to" type="email" value="'+esc(req.session.user.email||"")+'" required></label><button class="primary">Testmail versturen</button></form></div>'+
  '<div class="panel"><div class="section-head"><div><h2>Verzendgeschiedenis</h2><p class="hint">Laatste 250 verzendingen. Mislukte verzendingen tonen de SMTP-fout.</p></div></div><div class="table-wrap"><table><thead><tr><th>Aangemaakt</th><th>Type</th><th>Ontvanger</th><th>Bestelling</th><th>Status</th><th>Verzonden</th><th>Foutmelding</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="8">Er zijn nog geen e-mails gelogd.</td></tr>')+'</tbody></table></div></div>';
