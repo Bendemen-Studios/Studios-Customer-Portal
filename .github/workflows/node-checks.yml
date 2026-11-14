@@ -5,11 +5,9 @@ on:
     branches:
       - main
       - feature/mysql-runtime-migration
-      - feature/mail-logs-and-testing
   pull_request:
     branches:
       - main
-      - feature/mysql-runtime-migration
 
 jobs:
   checks:

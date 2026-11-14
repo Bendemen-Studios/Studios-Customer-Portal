@@ -63,7 +63,7 @@ const money = euro;
 function page(req, title, body) {
   const user = req.session.user;
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | Bendemen Supply Panel</title><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="stylesheet" href="/style.css"></head><body>
-  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/Supply%20Panel%20Logo.png" alt="Bendemen Supply Panel"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/services">Diensten</a>${user.role === "admin" ? '<details class="nav-dropdown"><summary>Beheer <span class="chevron">⌄</span></summary><div class="nav-dropdown-menu"><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a><a href="/admin/orders">Orderoverzicht</a><a href="/admin/mail">Mail logs</a></div></details>' : ''}</nav><div class="account"><a class="profile-icon" href="/account" aria-label="Profiel" title="Profiel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M4.5 20c.6-4 3.3-6 7.5-6s6.9 2 7.5 6"></path></svg></a><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
+  <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/Supply%20Panel%20Logo.png" alt="Bendemen Supply Panel"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/services">Diensten</a>${user.role === "admin" ? '<details class="nav-dropdown"><summary>Beheer <span class="chevron">⌄</span></summary><div class="nav-dropdown-menu"><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a><a href="/admin/orders">Orderoverzicht</a></div></details>' : ''}</nav><div class="account"><a class="profile-icon" href="/account" aria-label="Profiel" title="Profiel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M4.5 20c.6-4 3.3-6 7.5-6s6.9 2 7.5 6"></path></svg></a><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
   <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Bendemen Supply Panel</span></footer></body></html>`;
 }
 function moneyInput(value) { return Math.round(Number(String(value).replace(",", ".")) * 100); }
@@ -183,69 +183,6 @@ function createOrder(userId, lines, sourceOrderId=null, notes="", recurringOrder
   return tx();
 }
 
-const MAIL_TYPES = new Set(["new_order", "reminder_7", "reminder_3"]);
-function mailTypeLabel(type) {
-  return ({new_order:"Nieuwe bestelling",reminder_7:"Herinnering 7 dagen",reminder_3:"Herinnering 3 dagen"})[type] || type;
-}
-function mailSubject(type, order) {
-  if(type==="new_order")return "Bendemen Studios – bestelling #"+(order.number||order.id);
-  if(type==="reminder_7")return "Herinnering: je bestelling staat over 7 dagen gepland";
-  return "Laatste herinnering: je bestelling staat over 3 dagen gepland";
-}
-function loadMailOrder(orderId) {
-  const row=db.prepare("SELECT o.*,u.email customer_email FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=?").get(orderId);
-  if(!row)return null;
-  const items=db.prepare("SELECT product_name name,quantity FROM order_items WHERE order_id=?").all(orderId);
-  return {
-    id:row.id,
-    number:"SUPPLY-"+(row.local_order_no||row.id),
-    total:(Number(row.total_cents||0)/100).toFixed(2),
-    currency:row.currency||"EUR",
-    line_items:items,
-    email:row.customer_email,
-    wc_status:row.wc_status
-  };
-}
-function testMailOrder() {
-  return {id:"test",number:"TEST-001",total:"19.95",currency:"EUR",line_items:[{name:"Voorbeeldproduct",quantity:2}]};
-}
-async function sendLoggedMail({type,to,orderId=null,daysBefore=null,orderDate=null,isTest=false,parentLogId=null}) {
-  if(!MAIL_TYPES.has(type))throw new Error("Onbekend e-mailtype.");
-  const recipient=String(to||"").trim();
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient))throw new Error("Vul een geldig e-mailadres in.");
-  const order=isTest?testMailOrder():loadMailOrder(orderId);
-  if(!order)throw new Error("De gekoppelde bestelling bestaat niet meer.");
-  const effectiveDays=type==="reminder_7"?7:type==="reminder_3"?3:null;
-  const scheduledDate=effectiveDays?(orderDate||shiftDate(businessDate(),effectiveDays)):null;
-  const subject=mailSubject(type,order)+(isTest?" (test)":"");
-  const inserted=db.prepare(
-    "INSERT INTO mail_logs (email_type,order_id,recipient,subject,status,is_test,days_before,order_date,parent_log_id) VALUES (?,?,?,?,'sending',?,?,?,?)"
-  ).run(type,isTest?null:orderId,recipient,subject,isTest?1:0,effectiveDays,scheduledDate,parentLogId);
-  const logId=Number(inserted.lastInsertRowid);
-  try {
-    let result;
-    if(type==="new_order") {
-      result=await sendAutomatedOrderEmail({to:recipient,order,isTest});
-    } else {
-      result=await sendScheduledOrderReminder({to:recipient,order,daysBefore:effectiveDays,orderDate:scheduledDate,isTest});
-    }
-    db.prepare("UPDATE mail_logs SET status='sent',sent_at=CURRENT_TIMESTAMP,message_id=?,error=NULL WHERE id=?")
-      .run(result&&result.messageId?String(result.messageId).slice(0,500):null,logId);
-    return {success:true,logId};
-  } catch(error) {
-    db.prepare("UPDATE mail_logs SET status='failed',error=? WHERE id=?")
-      .run(String(error.message||error).slice(0,1500),logId);
-    console.error("E-mail verzending mislukt ("+type+") naar "+recipient+":",error.message);
-    return {success:false,logId,error:String(error.message||error)};
-  }
-}
-async function sendOrderCreatedEmail(orderId) {
-  const order=loadMailOrder(orderId);
-  if(!order)return {success:false,error:"Bestelling niet gevonden."};
-  return sendLoggedMail({type:"new_order",to:order.email,orderId});
-}
-
-
 
 
  
@@ -351,7 +288,7 @@ app.post("/orders/:id/reorder",requireAuth,async(req,res)=>{
   if(!order)return res.status(404).send("Bestelling niet gevonden.");
   const lines=orderItems(id).map(x=>({product_name:x.product_name,quantity:x.quantity,unit_price_cents:x.unit_price_cents}));
   const notes=String(req.body.notes||"").trim().slice(0,2000);
-  try{const newId=createOrder(req.session.user.id,lines,id,notes||"Herbestelling");await syncWooOrder(newId);await sendOrderWebhook(newId);await sendOrderCreatedEmail(newId);res.redirect(`/orders/${newId}`);}catch(err){console.error(err);res.status(500).send("Herbestelling maken is mislukt.");}
+  try{const newId=createOrder(req.session.user.id,lines,id,notes||"Herbestelling");await syncWooOrder(newId);await sendOrderWebhook(newId);res.redirect(`/orders/${newId}`);}catch(err){console.error(err);res.status(500).send("Herbestelling maken is mislukt.");}
 });
 app.post("/orders/:id/cancel",requireAuth,(req,res)=>{
   const id=Number(req.params.id),order=db.prepare("SELECT * FROM orders WHERE id=? AND user_id=?").get(id,req.session.user.id);
@@ -367,63 +304,6 @@ app.get("/admin",requireAuth,requireAdmin,(req,res)=>{
  const rows=customers.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+esc(c.email)+'</td><td>'+(c.wc_customer_id?'#'+esc(c.wc_customer_id):'Niet gekoppeld')+'</td><td>'+(c.active?'Actief':'Uitgeschakeld')+'</td><td><a href="/admin/customers/'+c.id+'">Bekijken</a> · <form method="post" action="/admin/customers/'+c.id+'/access"><button class="secondary">'+(c.active?'Uitschakelen':'Activeren')+'</button></form></td></tr>').join("");
  res.send(page(req,"Beheer",'<div class="page-title"><div class="eyebrow">BEHEER</div><h1>Klanten</h1><p>Alleen WooCommerce-klanten die je hier toevoegt krijgen toegang.</p><div class="row-actions"><a class="primary inline" href="/admin/customers/search">Klant toevoegen →</a><a class="secondary" href="/admin/orders">Orderoverzicht →</a></div></div><div class="panel"><table><thead><tr><th>Naam</th><th>E-mail</th><th>WooCommerce</th><th>Toegang</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5">Nog geen klanten toegevoegd.</td></tr>')+'</tbody></table></div>'));
 });
-
-app.get("/admin/mail",requireAuth,requireAdmin,(req,res)=>{
- const logs=db.prepare("SELECT * FROM mail_logs ORDER BY id DESC LIMIT 250").all();
- const rows=logs.map(log=>{
-  const status=log.status==="sent"?"Verzonden":log.status==="failed"?"Mislukt":log.status==="skipped"?"Overgeslagen":"Bezig";
-  const orderLabel=log.order_id?"SUPPLY-"+(db.prepare("SELECT COALESCE(local_order_no,id) n FROM orders WHERE id=?").get(log.order_id)?.n||log.order_id):(log.is_test?"Testmail":"—");
-  return '<tr><td>'+esc(log.created_at)+'</td><td>'+esc(mailTypeLabel(log.email_type))+(log.is_test?' <span class="mail-tag">TEST</span>':'')+'</td><td>'+esc(log.recipient)+'</td><td>'+esc(orderLabel)+'</td><td><span class="mail-status mail-'+esc(log.status)+'">'+esc(status)+'</span></td><td>'+esc(log.sent_at||'—')+'</td><td>'+(log.error?'<span class="mail-error" title="'+esc(log.error)+'">'+esc(log.error)+'</span>':'—')+'</td><td><form method="post" action="/admin/mail/'+log.id+'/resend" onsubmit="return confirm(\'Deze e-mail opnieuw versturen naar '+esc(log.recipient)+'?\')"><button class="secondary">Opnieuw versturen</button></form></td></tr>';
- }).join("");
- const notice=(req.query.sent||req.query.resent)?'<div class="success">E-mail is succesvol verzonden.</div>':req.query.failed?'<div class="alert">Verzending mislukt. Bekijk de foutmelding in het logboek.</div>':"";
- const body='<a class="back" href="/admin">← Beheer</a><div class="page-title"><div class="eyebrow">BEHEER</div><h1>Mail logs</h1><p>Controleer e-mailverzendingen, test alle templates en verstuur een eerder bericht opnieuw.</p></div>'+notice+
- '<div class="panel"><h2>Testmail versturen</h2><p>De test wordt naar het ingevulde adres gestuurd en gebruikt voorbeeldgegevens. Er wordt geen echte bestelling aangemaakt.</p><form method="post" action="/admin/mail/test" class="stack"><label>Type e-mail<select name="email_type" required><option value="new_order">Nieuwe bestelling (met PDF-bijlage)</option><option value="reminder_7">Herinnering 7 dagen</option><option value="reminder_3">Herinnering 3 dagen</option></select></label><label>Ontvanger<input name="to" type="email" value="'+esc(req.session.user.email||"")+'" required></label><button class="primary">Testmail versturen</button></form></div>'+
- '<div class="panel"><div class="section-head"><div><h2>Verzendgeschiedenis</h2><p class="hint">Laatste 250 verzendingen. Mislukte verzendingen tonen de SMTP-fout.</p></div></div><div class="table-wrap"><table><thead><tr><th>Aangemaakt</th><th>Type</th><th>Ontvanger</th><th>Bestelling</th><th>Status</th><th>Verzonden</th><th>Foutmelding</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="8">Er zijn nog geen e-mails gelogd.</td></tr>')+'</tbody></table></div></div>';
- res.send(page(req,"Mail logs",body));
-});
-app.post("/admin/mail/test",requireAuth,requireAdmin,async(req,res)=>{
- const type=String(req.body.email_type||"");
- const to=String(req.body.to||"").trim();
- if(!MAIL_TYPES.has(type))return res.status(400).send("Ongeldig e-mailtype.");
- if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(to))return res.status(400).send("Vul een geldig e-mailadres in.");
- const result=await sendLoggedMail({type,to,isTest:true});
- res.redirect("/admin/mail?"+(result.success?"sent=1":"failed=1"));
-});
-app.post("/admin/mail/:id/resend",requireAuth,requireAdmin,async(req,res)=>{
- const logId=Number(req.params.id);
- const original=db.prepare("SELECT * FROM mail_logs WHERE id=?").get(logId);
- if(!original)return res.status(404).send("E-maillog niet gevonden.");
- if(!MAIL_TYPES.has(original.email_type))return res.status(400).send("Onbekend e-mailtype.");
- if(!original.is_test&&!original.order_id)return res.status(404).send("De oorspronkelijke bestelling is niet meer beschikbaar.");
- if(!original.is_test&&original.email_type!=="new_order") {
-  const order=db.prepare("SELECT wc_order_id,wc_status,status FROM orders WHERE id=?").get(original.order_id);
-  if(!order)return res.status(404).send("Bestelling niet gevonden.");
-  const paid=new Set(["processing","completed","paid","betaald","refunded","cancelled","canceled"]);
-  if(paid.has(String(order.wc_status||"").toLowerCase())||paid.has(String(order.status||"").toLowerCase()))
-   return res.status(409).send("Deze herinnering kan niet opnieuw worden verstuurd: de bestelling is betaald of afgesloten.");
-  if(order.wc_order_id) {
-   try {
-    const live=await woo.getOrder(order.wc_order_id);
-    if(["processing","completed","refunded","cancelled"].includes(String(live.status||"").toLowerCase())||live.date_paid)
-     return res.status(409).send("Deze herinnering kan niet opnieuw worden verstuurd: de WooCommerce-bestelling is betaald of afgesloten.");
-   } catch(error) {
-    console.error("WooCommerce statuscontrole vóór resend mislukt:",error.message);
-    return res.status(503).send("De actuele betaalstatus kon niet worden gecontroleerd. Er is geen herinnering verstuurd.");
-   }
-  }
- }
- const result=await sendLoggedMail({
-  type:original.email_type,
-  to:original.recipient,
-  orderId:original.order_id,
-  daysBefore:original.days_before,
-  orderDate:original.order_date,
-  isTest:Boolean(original.is_test),
-  parentLogId:original.id
- });
- res.redirect("/admin/mail?"+(result.success?"resent=1":"failed=1"));
-});
-
 app.post("/admin/orders/refresh",requireAuth,requireAdmin,async(req,res)=>{
  const stats=await syncDeletedWooOrders();
  if(stats.busy)return res.status(409).send("Er loopt al een WooCommerce-synchronisatie. Probeer het zo opnieuw.");
@@ -490,7 +370,7 @@ app.post("/admin/customers/:id/reorder",requireAuth,requireAdmin,async(req,res)=
  const lines=ids.flatMap(id=>orderItems(id).map(x=>({product_name:x.product_name,quantity:x.quantity,unit_price_cents:x.unit_price_cents})));
  if(!lines.length)return res.status(400).send("De geselecteerde orders bevatten geen orderregels.");
  const notes=String(req.body.notes||"").trim().slice(0,2000)||"Herbestelling op verzoek van beheer";
- try{const newId=createOrder(customerId,lines,null,notes);await syncWooOrder(newId);await sendOrderWebhook(newId);await sendOrderCreatedEmail(newId);res.redirect("/orders/"+newId);}
+ try{const newId=createOrder(customerId,lines,null,notes);await syncWooOrder(newId);await sendOrderWebhook(newId);res.redirect("/orders/"+newId);}
  catch(err){console.error("Admin customer reorder failed:",err.message);res.status(500).send("Herbestelling maken is mislukt.");}
 });
 
@@ -599,7 +479,6 @@ app.post("/admin/subscriptions/:id/generate",requireAuth,requireAdmin,async(req,
   const orderId=result.orderId;
   await syncWooOrder(orderId);
   await sendOrderWebhook(orderId);
-  await sendOrderCreatedEmail(orderId);
   res.redirect("/admin/subscriptions/"+id+"/products?order_created=1");
  }catch(err){console.error("Manual subscription order sync failed:",err.message);res.status(502).send("Bestelling is lokaal aangemaakt, maar synchronisatie is mislukt: "+esc(err.message));}
 });
@@ -660,7 +539,6 @@ async function processRecurringOrders(){
     if(created){
      await syncWooOrder(created.orderId);
      await sendOrderWebhook(created.orderId);
-     await sendOrderCreatedEmail(created.orderId);
      console.log("Terugkerende bestelling "+created.orderId+" aangemaakt voor "+created.scheduledDate+" (14 dagen vooraf).");
     }
    }catch(err){console.error("Terugkerende bestelling mislukt voor "+sub.id+":",err.message);}
@@ -691,26 +569,22 @@ async function processRecurringOrders(){
     const terminalStatuses=new Set(["refunded","cancelled","canceled"]);
     if(paidStatuses.has(currentStatus)||paidStatuses.has(localStatus)||paymentDate||
        terminalStatuses.has(currentStatus)||terminalStatuses.has(localStatus)){
-     const skippedType=reminder.days_before===7?"reminder_7":"reminder_3";
-     db.prepare("INSERT INTO mail_logs (email_type,order_id,recipient,subject,status,error,days_before,order_date) VALUES (?,?,?,?, 'skipped',?,?,?)")
-      .run(skippedType,reminder.order_id,reminder.email,mailSubject(skippedType,{number:reminder.wc_order_number||reminder.wc_order_id||reminder.order_id}),"Herinnering overgeslagen: bestelling is betaald of afgesloten.",reminder.days_before,reminder.scheduled_for);
      db.prepare("UPDATE recurring_order_reminders SET status='skipped',claimed_at=NULL,last_error=? WHERE id=?")
       .run("Herinnering overgeslagen: bestelling is betaald of afgesloten.",reminder.id);
      console.log("Bestelherinnering overgeslagen voor order "+reminder.order_id+" (betaald/afgesloten).");
      continue;
     }
-    const mailResult=await sendLoggedMail({
-     type:reminder.days_before===7?"reminder_7":"reminder_3",
+    const sent=await sendScheduledOrderReminder({
      to:reminder.email,
-     orderId:reminder.order_id,
+     order:{id:reminder.order_id,number:reminder.wc_order_number||reminder.wc_order_id||reminder.order_id},
      daysBefore:reminder.days_before,
      orderDate:reminder.scheduled_for
     });
-    if(mailResult.success){
+    if(sent){
      db.prepare("UPDATE recurring_order_reminders SET status='sent',sent_at=CURRENT_TIMESTAMP,claimed_at=NULL,last_error=NULL WHERE id=?").run(reminder.id);
      console.log("Bestelherinnering ("+reminder.days_before+" dagen) verzonden voor order "+reminder.order_id+".");
     }else{
-     db.prepare("UPDATE recurring_order_reminders SET status='pending',claimed_at=NULL,last_error=? WHERE id=?").run("E-mailverzending mislukt. Bekijk Mail logs voor de details.",reminder.id);
+     db.prepare("UPDATE recurring_order_reminders SET status='pending',claimed_at=NULL,last_error=? WHERE id=?").run("SMTP is niet geconfigureerd.",reminder.id);
     }
    }catch(err){
     db.prepare("UPDATE recurring_order_reminders SET status='pending',claimed_at=NULL,last_error=? WHERE id=?").run(String(err.message||err).slice(0,1000),reminder.id);
