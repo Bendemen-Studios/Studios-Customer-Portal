@@ -394,6 +394,7 @@ app.post("/admin/mail/:id/resend",requireAuth,requireAdmin,async(req,res)=>{
  const original=db.prepare("SELECT * FROM mail_logs WHERE id=?").get(logId);
  if(!original)return res.status(404).send("E-maillog niet gevonden.");
  if(!MAIL_TYPES.has(original.email_type))return res.status(400).send("Onbekend e-mailtype.");
+ if(!original.is_test&&!original.order_id)return res.status(404).send("De oorspronkelijke bestelling is niet meer beschikbaar.");
  if(!original.is_test&&original.email_type!=="new_order") {
   const order=db.prepare("SELECT wc_order_id,wc_status,status FROM orders WHERE id=?").get(original.order_id);
   if(!order)return res.status(404).send("Bestelling niet gevonden.");
