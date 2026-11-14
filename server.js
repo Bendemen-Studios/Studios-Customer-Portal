@@ -533,6 +533,3 @@ setInterval(()=>processRecurringOrders().catch(err=>console.error("Recurring sch
 setTimeout(()=>syncDeletedWooOrders(),15000).unref();
 setInterval(()=>syncDeletedWooOrders(),300000).unref();
 app.listen(PORT, "0.0.0.0", ()=>console.log(`Bendemen Supply Panel draait op poort ${PORT}`));
-
-process.once("SIGTERM", async () => { await sessionStore.close(); await redis.close(); });
-process.once("SIGINT", async () => { await sessionStore.close(); await redis.close(); });
