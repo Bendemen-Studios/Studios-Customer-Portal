@@ -61,3 +61,7 @@ Voor actieve terugkerende bestellingen maakt de scheduler de Supply Panel-order 
 Verzendmomenten worden in `recurring_order_reminders` opgeslagen. Een herinnering wordt pas als verzonden gemarkeerd nadat SMTP de e-mail heeft geaccepteerd. Bij een SMTP-fout blijft de herinnering open voor een nieuwe poging. De scheduler gebruikt standaard de tijdzone `Europe/Amsterdam`; dit kan worden aangepast met `BUSINESS_TIME_ZONE`.
 
 Voor het versturen moeten de bestaande SMTP-variabelen (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`) en `PANEL_PUBLIC_URL` zijn ingesteld.
+
+### Betaalde bestellingen en herinneringen
+
+Vlak vóór iedere herinneringsmail controleert de scheduler de actuele WooCommerce-orderstatus. Bestellingen met status `processing` of `completed`, een ingevulde betaaldatum, of een lokale betaalde status krijgen geen herinnering. Ook geannuleerde en terugbetaalde bestellingen worden overgeslagen. Als WooCommerce tijdelijk niet bereikbaar is, wordt de mail niet verstuurd en blijft de herinnering klaarstaan voor een nieuwe controle.
