@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS recurring_order_reminders (
  days_before INTEGER NOT NULL CHECK(days_before IN (7,3)),
  status TEXT NOT NULL DEFAULT 'pending',
  sent_at TEXT,
+ claimed_at INTEGER,
  last_error TEXT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  UNIQUE(recurring_order_id, scheduled_for, days_before)
