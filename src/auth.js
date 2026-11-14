@@ -1,16 +1,15 @@
 "use strict";
 
-const mysql = require("./mysql");
+const db = require("./db");
 
 async function requireAuth(req, res, next) {
   if (!req.session.user) return res.redirect("/login");
 
   try {
-    const rows = await mysql.query(
-      "SELECT id,name,email,role,active FROM users WHERE id=? LIMIT 1",
-      [req.session.user.id]
-    );
-    const user = rows[0];
+    const user = db.prepare(
+      "SELECT id,name,email,role,active FROM users WHERE id=? LIMIT 1"
+    ).get(req.session.user.id);
+
     if (!user || Number(user.active) !== 1) {
       return req.session.destroy(() => res.redirect("/login?disabled=1"));
     }

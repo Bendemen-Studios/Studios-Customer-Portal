@@ -7,3 +7,14 @@ BENDEMEN SUPPLY PANEL - PTERODACTYL
 - SMTP gebruikt poort 465 met SSL/TLS: SMTP_PORT=465 en SMTP_SECURE=true.
 - PANEL_PUBLIC_URL is de volledige publieke HTTPS-basis-URL.
 - Behoud .env en data/bendemen.sqlite bij updates.
+
+REDIS
+- Redis is optioneel; zonder Redis blijft de sessieopslag op SQLite werken.
+- Kies REDIS_URL OF REDIS_HOST/REDIS_PORT. De losse configuratie ondersteunt REDIS_USERNAME, REDIS_PASSWORD, REDIS_TLS en REDIS_DB.
+- Gebruik per applicatie een unieke REDIS_SESSION_PREFIX en REDIS_CACHE_PREFIX wanneer Redis gedeeld wordt.
+- /health geeft aan of Redis geconfigureerd en bereikbaar is.
+
+MYSQL-STATUS
+- migrate.js kopieert SQLite-gegevens naar MySQL en controleert de kopie.
+- De runtime-databasequeries in server.js gebruiken nog SQLite. MySQL is dus nog NIET de actieve applicatiedatabase.
+- Verwijder of wijzig de SQLite-database niet na een migratie totdat de volledige runtime-omzetting en acceptatietests zijn afgerond.

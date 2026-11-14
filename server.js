@@ -39,14 +39,11 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression({ threshold: 1024, level: 6 }));
 app.use(express.urlencoded({ extended: false, limit: "2mb", verify: (req,res,buf) => { req.rawBody = Buffer.from(buf); } }));
 app.use(express.json({ limit: "2mb", verify: (req,res,buf) => { req.rawBody = Buffer.from(buf); } }));
-class SQLiteSessionStore extends session.Store {
- get(sid,callback){try{const row=db.prepare("SELECT data FROM sessions WHERE sid=? AND expires_at>?").get(sid,Date.now());callback(null,row?JSON.parse(row.data):null);}catch(err){callback(err);}}
- set(sid,sess,callback){try{const expires=sess.cookie&&sess.cookie.expires?new Date(sess.cookie.expires).getTime():Date.now()+86400000;db.prepare("INSERT INTO sessions(sid,data,expires_at) VALUES(?,?,?) ON CONFLICT(sid) DO UPDATE SET data=excluded.data,expires_at=excluded.expires_at").run(sid,JSON.stringify(sess),expires);callback&&callback(null);}catch(err){callback&&callback(err);}}
- destroy(sid,callback){try{db.prepare("DELETE FROM sessions WHERE sid=?").run(sid);callback&&callback(null);}catch(err){callback&&callback(err);}}
- touch(sid,sess,callback){try{const expires=sess.cookie&&sess.cookie.expires?new Date(sess.cookie.expires).getTime():Date.now()+86400000;db.prepare("UPDATE sessions SET expires_at=? WHERE sid=?").run(expires,sid);callback&&callback(null);}catch(err){callback&&callback(err);}}
-}
+const PersistentSessionStore = require("./src/session-store");
+const redis = require("./src/redis");
+const sessionStore = new PersistentSessionStore();
 app.use(session({
-  store: new SQLiteSessionStore(), name: "bendemen.sid", secret: process.env.SESSION_SECRET || "development-only-change-this-secret",
+  store: sessionStore, name: "bendemen.sid", secret: process.env.SESSION_SECRET || "development-only-change-this-secret",
   resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 8 * 60 * 60 * 1000 }
 }));
@@ -502,7 +499,7 @@ app.post("/admin/subscriptions/:id/products",requireAuth,requireAdmin,(req,res)=
 });
 app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>res.redirect("/admin"));
 
-app.get("/health",(_req,res)=>res.json({ok:true}));
+app.get("/health",async(_req,res)=>{const redisStatus=await redis.healthCheck();res.json({ok:true,redis:redisStatus});});
 app.use((err,req,res,next)=>{console.error(err);res.status(500).send("Er is iets misgegaan.");});
 function addBillingPeriod(dateString,interval){
  const date=new Date(dateString+"T12:00:00.000Z");
