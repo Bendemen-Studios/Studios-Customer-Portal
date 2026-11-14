@@ -8,7 +8,7 @@
     "start": "node server.js",
     "create-admin": "node scripts/create-admin.js",
     "migrate:mysql": "node migrate.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js"
   },
   "engines": {
     "node": ">=20"
