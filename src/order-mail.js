@@ -49,15 +49,35 @@ function orderUrl(order, isTest) {
     : base + "/orders/" + encodeURIComponent(order.id);
 }
 
+function emailLayout(content) {
+  const base = process.env.PANEL_PUBLIC_URL.replace(/\/$/, "");
+  const header = base + "/automailheader.png";
+  const footer = base + "/automailfooter.png";
+  return `<!doctype html>
+<html lang="nl">
+  <body style="margin:0;padding:24px 12px;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#20242a;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;margin:0 auto;background:#ffffff;border-collapse:collapse;">
+      <tr><td style="padding:0;"><img src="${header}" width="500" alt="Bendemen Studios" style="display:block;width:100%;max-width:500px;height:auto;border:0;margin:0 auto;"></td></tr>
+      <tr><td style="padding:28px 30px;line-height:1.6;font-size:15px;">${content}</td></tr>
+      <tr><td style="padding:0;"><img src="${footer}" width="500" alt="Bendemen Studios" style="display:block;width:100%;max-width:500px;height:auto;border:0;margin:0 auto;"></td></tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function sender() {
+  return process.env.SMTP_FROM || '"Mailnaam | Bendemen Supply Panel BETA" <supplypanel@bendemen.nl>';
+}
+
 async function sendAutomatedOrderEmail({ to, order, isTest = false }) {
   const url = orderUrl(order, isTest);
   const pdf = await makePdf(order);
   return transporter().sendMail({
-    from: process.env.SMTP_FROM,
+    from: sender(),
     to,
     subject: `Bendemen Studios – bestelling #${order.number || order.id}${isTest ? " (test)" : ""}`,
     text: `Je bestelling staat klaar. Bekijk de bestelling in het Bendemen Supply Panel: ${url}`,
-    html: `<p>Je bestelling staat klaar.</p><p><a href="${url}">Bekijk bestelling en betaal veilig</a></p>`,
+    html: emailLayout(`<p>Je bestelling staat klaar.</p><p><a href="${url}" style="display:inline-block;padding:12px 18px;background:#20242a;color:#ffffff;text-decoration:none;border-radius:4px;">Bekijk bestelling en betaal veilig</a></p>`),
     attachments: [{
       filename: `bestelling-${order.number || order.id}.pdf`,
       content: pdf
@@ -76,11 +96,11 @@ async function sendScheduledOrderReminder({ to, order, daysBefore, orderDate, is
     : "Laatste herinnering: je bestelling staat over 3 dagen gepland";
   const text = `Je geplande bestelling staat gepland op ${date}. Bekijk de bestelling in het Bendemen Supply Panel: ${url}`;
   return transporter().sendMail({
-    from: process.env.SMTP_FROM,
+    from: sender(),
     to,
     subject: subject + (isTest ? " (test)" : ""),
     text,
-    html: `<p>Dit is een herinnering voor je geplande bestelling.</p><p>De bestelling staat gepland op <strong>${date}</strong> (over ${daysBefore} dagen).</p><p><a href="${url}">Bekijk je bestelling in het Bendemen Supply Panel</a></p><p>Heb je vragen? Neem dan contact met ons op.</p>`
+    html: emailLayout(`<p>Dit is een herinnering voor je geplande bestelling.</p><p>De bestelling staat gepland op <strong>${date}</strong> (over ${daysBefore} dagen).</p><p><a href="${url}" style="display:inline-block;padding:12px 18px;background:#20242a;color:#ffffff;text-decoration:none;border-radius:4px;">Bekijk je bestelling in het Bendemen Supply Panel</a></p><p>Heb je vragen? Neem dan contact met ons op.</p>`)
   });
 }
 
