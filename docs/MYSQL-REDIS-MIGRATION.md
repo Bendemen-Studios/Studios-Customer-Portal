@@ -60,7 +60,7 @@ Voor actieve terugkerende bestellingen maakt de scheduler de Supply Panel-order 
 
 Verzendmomenten worden in `recurring_order_reminders` opgeslagen. Een herinnering wordt pas als verzonden gemarkeerd nadat SMTP de e-mail heeft geaccepteerd. Bij een SMTP-fout blijft de herinnering open voor een nieuwe poging. De scheduler gebruikt standaard de tijdzone `Europe/Amsterdam`; dit kan worden aangepast met `BUSINESS_TIME_ZONE`.
 
-Voor het versturen moeten de bestaande SMTP-variabelen (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`) en `PANEL_PUBLIC_URL` zijn ingesteld.
+Voor het versturen moeten de SMTP-variabelen (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`) en `PANEL_PUBLIC_URL` zijn ingesteld. Configureer `SMTP_USER=supplypanel@bendemen.nl` wanneer dit de mailboxlogin van je provider is. Gebruik als afzender `SMTP_FROM="Mailnaam | Bendemen Supply Panel BETA <supplypanel@bendemen.nl>"`. Vervang `SMTP_HOST` en `SMTP_PASS` door de servergegevens en het wachtwoord van deze mailbox. De header en footer worden geladen vanaf `PANEL_PUBLIC_URL/automailheader.png` en `PANEL_PUBLIC_URL/automailfooter.png`.
 
 ### Betaalde bestellingen en herinneringen
 
