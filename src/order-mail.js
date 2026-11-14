@@ -72,17 +72,17 @@ function sender(displayName) {
 
 async function sendAutomatedOrderEmail({ to, order, isTest = false }) {
   const url = orderUrl(order, isTest);
-  const pdf = await makePdf(order);
+  const attachments = isTest ? [] : [{
+    filename: `bestelling-${order.number || order.id}.pdf`,
+    content: await makePdf(order)
+  }];
   return transporter().sendMail({
     from: sender("Factuur aangemaakt | Bendemen Supply Panel BETA"),
     to,
     subject: `Bendemen Studios – bestelling #${order.number || order.id}${isTest ? " (test)" : ""}`,
     text: `Je bestelling staat klaar. Bekijk de bestelling in het Bendemen Supply Panel: ${url}`,
     html: emailLayout(`<p>Je bestelling staat klaar.</p><p><a href="${url}" style="display:inline-block;padding:12px 18px;background:#20242a;color:#ffffff;text-decoration:none;border-radius:4px;">Bekijk bestelling en betaal veilig</a></p>`),
-    attachments: [{
-      filename: `bestelling-${order.number || order.id}.pdf`,
-      content: pdf
-    }]
+    attachments
   });
 }
 
