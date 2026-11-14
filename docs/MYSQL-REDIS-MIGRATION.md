@@ -65,3 +65,15 @@ Voor het versturen moeten de bestaande SMTP-variabelen (`SMTP_HOST`, `SMTP_USER`
 ### Betaalde bestellingen en herinneringen
 
 Vlak vóór iedere herinneringsmail controleert de scheduler de actuele WooCommerce-orderstatus. Bestellingen met status `processing` of `completed`, een ingevulde betaaldatum, of een lokale betaalde status krijgen geen herinnering. Ook geannuleerde en terugbetaalde bestellingen worden overgeslagen. Als WooCommerce tijdelijk niet bereikbaar is, wordt de mail niet verstuurd en blijft de herinnering klaarstaan voor een nieuwe controle.
+
+
+## Mailbeheer en testmails
+
+Onder **Beheer → Mail logs** worden de laatste 250 e-mailpogingen getoond, met type, ontvanger, order, status, tijdstip en foutmelding. Vanuit dit scherm kunnen beheerders testmails sturen voor:
+- Nieuwe bestelling (inclusief PDF-pro-forma bijlage).
+- Herinnering 7 dagen vooraf.
+- Herinnering 3 dagen vooraf.
+
+Testmails gebruiken voorbeeldgegevens en maken geen echte order aan. Elke test en resend wordt apart gelogd. Bij resend van een herinnering controleert Supply Panel opnieuw de actuele WooCommerce-betaalstatus; betaalde, terugbetaalde of geannuleerde bestellingen worden niet opnieuw gemaild.
+
+De SMTP-verbinding en daadwerkelijke aflevering moeten na installatie worden getest met de testmailfunctie. Een status 'Verzonden' betekent dat de SMTP-server de mail heeft geaccepteerd, niet dat de ontvanger hem al in de inbox heeft ontvangen.
