@@ -66,6 +66,21 @@ function page(req, title, body) {
   <header class="top"><a class="brand" href="/"><img class="brand-logo" src="/Supply%20Panel%20Logo.png" alt="Bendemen Supply Panel"></a>${user ? `<nav><a href="/">Dashboard</a><a href="/orders">Bestellingen</a><a href="/services">Diensten</a>${user.role === "admin" ? '<details class="nav-dropdown"><summary>Beheer <span class="chevron">⌄</span></summary><div class="nav-dropdown-menu"><a href="/admin/products">Producten</a><a href="/admin/subscriptions">Abonnementen</a><a href="/admin/orders">Orderoverzicht</a><a href="/admin/mail">Mail logs</a></div></details>' : ''}</nav><div class="account"><a class="profile-icon" href="/account" aria-label="Profiel" title="Profiel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M4.5 20c.6-4 3.3-6 7.5-6s6.9 2 7.5 6"></path></svg></a><form method="post" action="/logout"><button class="linkbtn">Uitloggen</button></form></div>` : '<a class="mutedlink" href="/login">Inloggen</a>'}</header>
   <main class="wrap">${body}</main><footer>© ${new Date().getFullYear()} Bendemen Studios <span>Bendemen Supply Panel</span></footer></body></html>`;
 }
+// Toon foutmeldingen uit routes als een duidelijke melding in de applicatie,
+// in plaats van kale tekst op een verder lege pagina.
+app.use((req,res,next)=>{
+  const originalSend=res.send;
+  res.send=function(body){
+    if(res.statusCode>=400 && typeof body==="string" &&
+       !/<(?:!doctype|html|body|main|section|div)\\b/i.test(body)){
+      const message=esc(body.replace(/<[^>]*>/g," ").trim()||"Er is iets misgegaan.");
+      body=page(req,"Melding",'<section class="auth-card" role="alert"><div class="eyebrow">VERZOEK NIET GELUKT</div><h1>Er ging iets mis.</h1><p class="sub">'+message+'</p><div class="row-actions"><button class="primary" type="button" onclick="history.back()">Terug</button><a class="secondary" href="/">Naar dashboard</a></div></section>');
+      res.type("html");
+    }
+    return originalSend.call(this,body);
+  };
+  next();
+});
 function moneyInput(value) { return Math.round(Number(String(value).replace(",", ".")) * 100); }
 function orderItems(orderId) { return db.prepare("SELECT product_name,quantity,unit_price_cents FROM order_items WHERE order_id=?").all(orderId); }
 function displayOrderStatus(o) {
@@ -377,7 +392,7 @@ app.get("/admin/mail",requireAuth,requireAdmin,(req,res)=>{
  }).join("");
  const notice=(req.query.sent||req.query.resent)?'<div class="success">E-mail is succesvol verzonden.</div>':req.query.failed?'<div class="alert">Verzending mislukt. Bekijk de foutmelding in het logboek.</div>':"";
  const body='<a class="back" href="/admin">← Beheer</a><div class="page-title"><div class="eyebrow">BEHEER</div><h1>Mail logs</h1><p>Controleer e-mailverzendingen, test alle templates en verstuur een eerder bericht opnieuw.</p></div>'+notice+
- '<div class="panel"><h2>Testmail versturen</h2><p>De test wordt naar het ingevulde adres gestuurd en gebruikt voorbeeldgegevens. Er wordt geen echte bestelling aangemaakt.</p><form method="post" action="/admin/mail/test" class="stack"><label>Type e-mail<select name="email_type" required><option value="new_order">Nieuwe bestelling (met PDF-bijlage)</option><option value="reminder_7">Herinnering 7 dagen</option><option value="reminder_3">Herinnering 3 dagen</option></select></label><label>Ontvanger<input name="to" type="email" value="'+esc(req.session.user.email||"")+'" required></label><button class="primary">Testmail versturen</button></form></div>'+
+ '<div class="panel"><h2>Testmail versturen</h2><p>De test wordt naar het ingevulde adres gestuurd en gebruikt voorbeeldgegevens. Er wordt geen echte bestelling aangemaakt.</p><form method="post" action="/admin/mail/test" class="stack"><label>Type e-mail<select name="email_type" required><option value="new_order">Nieuwe bestelling (voorbeeldmail)</option><option value="reminder_7">Herinnering 7 dagen</option><option value="reminder_3">Herinnering 3 dagen</option></select></label><label>Ontvanger<input name="to" type="email" value="'+esc(req.session.user.email||"")+'" required></label><button class="primary">Testmail versturen</button></form></div>'+
  '<div class="panel"><div class="section-head"><div><h2>Verzendgeschiedenis</h2><p class="hint">Laatste 250 verzendingen. Mislukte verzendingen tonen de SMTP-fout.</p></div></div><div class="table-wrap"><table><thead><tr><th>Aangemaakt</th><th>Type</th><th>Ontvanger</th><th>Bestelling</th><th>Status</th><th>Verzonden</th><th>Foutmelding</th><th>Actie</th></tr></thead><tbody>'+(rows||'<tr><td colspan="8">Er zijn nog geen e-mails gelogd.</td></tr>')+'</tbody></table></div></div>';
  res.send(page(req,"Mail logs",body));
 });
@@ -385,7 +400,7 @@ app.post("/admin/mail/test",requireAuth,requireAdmin,async(req,res)=>{
  const type=String(req.body.email_type||"");
  const to=String(req.body.to||"").trim();
  if(!MAIL_TYPES.has(type))return res.status(400).send("Ongeldig e-mailtype.");
- if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(to))return res.status(400).send("Vul een geldig e-mailadres in.");
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to))return res.status(400).send("Vul een geldig e-mailadres in.");
  const result=await sendLoggedMail({type,to,isTest:true});
  res.redirect("/admin/mail?"+(result.success?"sent=1":"failed=1"));
 });
