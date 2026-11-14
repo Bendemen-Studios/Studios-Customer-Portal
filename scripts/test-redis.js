@@ -1,5 +1,33 @@
 require("dotenv").config({path:require("path").join(__dirname,"..",".env")});
 const Redis=require("ioredis");
-if(!process.env.REDIS_HOST||!process.env.REDIS_PASSWORD)throw new Error("REDIS_HOST en REDIS_PASSWORD ontbreken.");
-const r=new Redis({host:process.env.REDIS_HOST,port:Number(process.env.REDIS_PORT||6379),username:process.env.REDIS_USERNAME||"default",password:process.env.REDIS_PASSWORD,tls:process.env.REDIS_TLS==="true"?{}:undefined,connectTimeout:10000,maxRetriesPerRequest:1,retryStrategy:()=>null});
-r.ping().then(async x=>{console.log("Redis verbinding OK:",x);await r.quit();}).catch(e=>{console.error("Redis verbinding mislukt:",e.message);r.disconnect();process.exitCode=1;});
+
+const options={
+  connectTimeout:10000,
+  maxRetriesPerRequest:1,
+  retryStrategy:()=>null
+};
+let client;
+if(process.env.REDIS_URL){
+  client=new Redis(process.env.REDIS_URL,{...options,lazyConnect:true});
+}else if(process.env.REDIS_HOST){
+  client=new Redis({
+    ...options,
+    host:process.env.REDIS_HOST,
+    port:Number(process.env.REDIS_PORT||6379),
+    db:Number(process.env.REDIS_DB||0),
+    username:process.env.REDIS_USERNAME||undefined,
+    password:process.env.REDIS_PASSWORD||undefined,
+    tls:process.env.REDIS_TLS==="true"?{}:undefined
+  });
+}else{
+  throw new Error("Configureer REDIS_URL of REDIS_HOST.");
+}
+
+client.ping().then(async result=>{
+  console.log("Redis verbinding OK:",result);
+  await client.quit();
+}).catch(error=>{
+  console.error("Redis verbinding mislukt:",error.message);
+  client.disconnect();
+  process.exitCode=1;
+});
