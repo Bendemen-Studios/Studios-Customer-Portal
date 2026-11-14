@@ -547,7 +547,7 @@ async function processRecurringOrders(){
   // Herstel vastgelopen claims na een onverwachte processtop.
   db.prepare("UPDATE recurring_order_reminders SET status='pending',claimed_at=NULL WHERE status='sending' AND claimed_at<?").run(Date.now()-10*60*1000);
   const reminders=db.prepare(
-   "SELECT r.id,r.order_id,r.scheduled_for,r.days_before,o.user_id,o.total_cents,o.currency,o.wc_order_number,o.wc_order_id,u.email " +
+   "SELECT r.id,r.order_id,r.scheduled_for,r.days_before,o.user_id,o.status AS order_status,o.total_cents,o.currency,o.wc_order_number,o.wc_order_id,u.email " +
    "FROM recurring_order_reminders r JOIN orders o ON o.id=r.order_id JOIN users u ON u.id=o.user_id " +
    "WHERE r.status='pending' AND r.scheduled_for<=? ORDER BY r.scheduled_for,r.id"
   ).all(today);
@@ -564,7 +564,7 @@ async function processRecurringOrders(){
      paymentDate=String(liveOrder.date_paid||"");
      db.prepare("UPDATE orders SET wc_status=? WHERE id=?").run(currentStatus,reminder.order_id);
     }
-    const localStatus=String(reminder.status||"").toLowerCase();
+    const localStatus=String(reminder.order_status||"").toLowerCase();
     const paidStatuses=new Set(["processing","completed","paid","betaald"]);
     const terminalStatuses=new Set(["refunded","cancelled","canceled"]);
     if(paidStatuses.has(currentStatus)||paidStatuses.has(localStatus)||paymentDate||
