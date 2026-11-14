@@ -6,7 +6,7 @@ function makePdf(order){return new Promise((resolve,reject)=>{const doc=new PDFD
 async function sendAutomatedOrderEmail({to,order}){if(!configured()){console.warn("Bestelmail niet verzonden: SMTP configuratie ontbreekt.");return false;}const url=`${process.env.PANEL_PUBLIC_URL.replace(/\/$/,"")}/orders/${encodeURIComponent(order.id)}`;const pdf=await makePdf(order);await transporter().sendMail({from:process.env.SMTP_FROM,to,subject:`Bendemen Studios – bestelling #${order.number||order.id}`,text:`Bekijk je bestelling en betaal veilig in het Bendemen Supply Panel: ${url}`,html:`<p>Je bestelling staat klaar.</p><p><a href="${url}">Bekijk bestelling en betaal veilig</a></p>`,attachments:[{filename:`bestelling-${order.number||order.id}.pdf`,content:pdf}]});return true;}
 async function sendScheduledOrderReminder({to,order,daysBefore,orderDate}) {
  if(!configured()){console.warn("Bestelherinnering niet verzonden: SMTP configuratie ontbreekt.");return false;}
- const url=`${process.env.PANEL_PUBLIC_URL.replace(/\\/$/,"")}/orders/${encodeURIComponent(order.id)}`;
+ const url=`${process.env.PANEL_PUBLIC_URL.replace(/\/$/,"")}/orders/${encodeURIComponent(order.id)}`;
  const date=new Intl.DateTimeFormat("nl-NL",{dateStyle:"long",timeZone:"Europe/Amsterdam"}).format(new Date(orderDate+"T12:00:00+01:00"));
  const subject=daysBefore===7
   ? `Herinnering: je bestelling staat over 7 dagen gepland`
