@@ -76,7 +76,7 @@ async function sendAutomatedOrderEmail({ to, order, isTest = false }) {
   const url = orderUrl(order, isTest);
   const pdf = await makePdf(order);
   return transporter().sendMail({
-    from: sender(`${daysBefore} Dagen nog om te betalen | Bendemen Supply Panel BETA`),
+    from: sender("Factuur aangemaakt | Bendemen Supply Panel BETA"),
     to,
     subject: `Bendemen Studios – bestelling #${order.number || order.id}${isTest ? " (test)" : ""}`,
     text: `Je bestelling staat klaar. Bekijk de bestelling in het Bendemen Supply Panel: ${url}`,
@@ -99,7 +99,7 @@ async function sendScheduledOrderReminder({ to, order, daysBefore, orderDate, is
     : "Laatste herinnering: je bestelling staat over 3 dagen gepland";
   const text = `Je geplande bestelling staat gepland op ${date}. Bekijk de bestelling in het Bendemen Supply Panel: ${url}`;
   return transporter().sendMail({
-    from: sender(),
+    from: sender(`${daysBefore} Dagen nog om te betalen | Bendemen Supply Panel BETA`),
     to,
     subject: subject + (isTest ? " (test)" : ""),
     text,
