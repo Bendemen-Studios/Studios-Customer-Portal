@@ -555,6 +555,25 @@ async function processRecurringOrders(){
    const claimed=db.prepare("UPDATE recurring_order_reminders SET status='sending',claimed_at=?,last_error=NULL WHERE id=? AND status='pending'").run(Date.now(),reminder.id);
    if(!claimed.changes)continue;
    try{
+    // Controleer de actuele WooCommerce-status vlak vóór verzending; de lokale kopie kan achterlopen.
+    let currentStatus="";
+    let paymentDate="";
+    if(reminder.wc_order_id){
+     const liveOrder=await woo.getOrder(reminder.wc_order_id);
+     currentStatus=String(liveOrder.status||"").toLowerCase();
+     paymentDate=String(liveOrder.date_paid||"");
+     db.prepare("UPDATE orders SET wc_status=? WHERE id=?").run(currentStatus,reminder.order_id);
+    }
+    const localStatus=String(reminder.status||"").toLowerCase();
+    const paidStatuses=new Set(["processing","completed","paid","betaald"]);
+    const terminalStatuses=new Set(["refunded","cancelled","canceled"]);
+    if(paidStatuses.has(currentStatus)||paidStatuses.has(localStatus)||paymentDate||
+       terminalStatuses.has(currentStatus)||terminalStatuses.has(localStatus)){
+     db.prepare("UPDATE recurring_order_reminders SET status='skipped',claimed_at=NULL,last_error=? WHERE id=?")
+      .run("Herinnering overgeslagen: bestelling is betaald of afgesloten.",reminder.id);
+     console.log("Bestelherinnering overgeslagen voor order "+reminder.order_id+" (betaald/afgesloten).");
+     continue;
+    }
     const sent=await sendScheduledOrderReminder({
      to:reminder.email,
      order:{id:reminder.order_id,number:reminder.wc_order_number||reminder.wc_order_id||reminder.order_id},
