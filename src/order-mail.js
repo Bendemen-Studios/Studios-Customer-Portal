@@ -65,8 +65,11 @@ function emailLayout(content) {
 </html>`;
 }
 
-function sender() {
-  return process.env.SMTP_FROM || '"Mailnaam | Bendemen Supply Panel BETA" <supplypanel@bendemen.nl>';
+function sender(displayName) {
+  const configuredFrom = process.env.SMTP_FROM || "supplypanel@bendemen.nl";
+  const addressMatch = configuredFrom.match(/<([^>]+)>/);
+  const address = addressMatch ? addressMatch[1] : configuredFrom;
+  return { name: displayName, address };
 }
 
 async function sendAutomatedOrderEmail({ to, order, isTest = false }) {
