@@ -87,3 +87,13 @@ textarea{ resize:vertical; }
  .brand-logo{width:140px}
  .top nav{gap:4px 10px}
 }
+
+
+/* Mail log status and diagnostic display */
+.mail-status{display:inline-flex;align-items:center;padding:4px 9px;border:1px solid var(--line);border-radius:20px;font-size:11px;white-space:nowrap}
+.mail-sent{color:#8fca9c;border-color:#42684a;background:#1d2b20}
+.mail-failed{color:#ff9b9b;border-color:#754242;background:#361d1d}
+.mail-sending{color:#e3c77d;border-color:#6b5a31;background:#302919}
+.mail-tag{display:inline-block;padding:2px 6px;border:1px solid var(--line);border-radius:3px;color:var(--muted);font-size:9px;letter-spacing:.08em}
+.mail-error{display:inline-block;max-width:260px;color:#ff9b9b;font-size:11px;overflow-wrap:anywhere}
+@media(max-width:850px){.mail-error{max-width:180px}}
