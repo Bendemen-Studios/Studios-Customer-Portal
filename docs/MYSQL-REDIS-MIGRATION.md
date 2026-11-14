@@ -51,3 +51,13 @@ Gebruik voor iedere applicatie een eigen Redis-prefix. Zo kunnen meerdere Supply
 - Een geslaagde CI-run bewijst niet dat de opgegeven productie-MySQL- en Redis-servers bereikbaar zijn.
 
 Schakel de bedrijfsdatabase dus niet om door alleen `SESSION_STORE_DRIVER` te wijzigen. Deze instelling verplaatst uitsluitend sessies.
+
+## Geplande terugkerende bestellingen
+
+Voor actieve terugkerende bestellingen maakt de scheduler de Supply Panel-order 14 dagen vóór `next_payment` aan. Dezelfde geplande datum krijgt twee herinneringen:
+- 7 dagen vóór de besteldatum.
+- 3 dagen vóór de besteldatum.
+
+Verzendmomenten worden in `recurring_order_reminders` opgeslagen. Een herinnering wordt pas als verzonden gemarkeerd nadat SMTP de e-mail heeft geaccepteerd. Bij een SMTP-fout blijft de herinnering open voor een nieuwe poging. De scheduler gebruikt standaard de tijdzone `Europe/Amsterdam`; dit kan worden aangepast met `BUSINESS_TIME_ZONE`.
+
+Voor het versturen moeten de bestaande SMTP-variabelen (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`) en `PANEL_PUBLIC_URL` zijn ingesteld.
