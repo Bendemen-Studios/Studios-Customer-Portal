@@ -106,6 +106,111 @@ async function main() {
 
       const indexes = sqlite.prepare("PRAGMA index_list(" + quote(table) + ")").all();
       const indexedColumns = new Set();
+      for (const index of indexes) {
+        for (const column of sqlite.prepare("PRAGMA index_info(" + quote(index.name) + ")").all()) {
+          indexedColumns.add(column.name);
+        }
+      }
+
+      const foreignKeys = sqlite.prepare("PRAGMA foreign_key_list(" + quote(table) + ")").all();
+      const primaryKey = columns.filter(column => column.pk).sort((a, b) => a.pk - b.pk);
+      const autoIncrementColumn = primaryKey.length === 1 && String(primaryKey[0].type).toUpperCase().includes("INT")
+        ? primaryKey[0] : null;
+      const definitions = columns.map(column => {
+        const type = mysqlType(column, indexedColumns, column === autoIncrementColumn);
+        const notNull = column.notnull && !column.pk ? " NOT NULL" : "";
+        const defaultValue = column.pk ? "" : safeDefault(column.dflt_value, column);
+        return quote(column.name) + " " + type + notNull + defaultValue;
+      });
+
+      if (primaryKey.length) {
+        definitions.push("PRIMARY KEY (" + primaryKey.map(column => quote(column.name)).join(",") + ")");
+      }
+
+      for (const fk of foreignKeys) {
+        definitions.push(
+          "CONSTRAINT " + quote("fk_" + table + "_" + fk.id) +
+          " FOREIGN KEY (" + quote(fk.from) + ") REFERENCES " + quote(fk.table) +
+          " (" + quote(fk.to) + ") ON DELETE " +
+          (fk.on_delete || "NO ACTION").toUpperCase().replace("RESTRICT", "RESTRICT")
+        );
+      }
+
+      await connection.query(
+        "CREATE TABLE IF NOT EXISTS " + quote(table) + " (" + definitions.join(",") +
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+      );
+
+      // Stop veilig bij een afwijkend schema; wijzig bestaande tabellen niet automatisch.
+      const [targetColumns] = await connection.query("SHOW COLUMNS FROM " + quote(table));
+      const targetColumnNames = new Set(targetColumns.map(column => String(column.Field)));
+      const missingColumns = columns.map(column => column.name).filter(name => !targetColumnNames.has(name));
+      if (missingColumns.length) {
+        throw new Error("MySQL-tabel mist kolommen (" + missingColumns.join(", ") + "). Herstel het schema of gebruik een lege migratiedatabase.");
+      }
+
+      // Ook indexen herstellen als een eerdere migratie na data-import stopte.
+      await ensureIndexes(connection, table, indexes, sqlite);
+
+      const sourceRows = sqlite.prepare("SELECT * FROM " + quote(table)).all();
+      const [targetRows] = await connection.query("SELECT COUNT(*) AS total FROM " + quote(table));
+      const existingCount = Number(targetRows[0].total);
+      if (existingCount !== 0) {
+        const orderBy = primaryKey.length
+          ? primaryKey.map(column => quote(column.name)).join(",")
+          : quote(columns[0].name);
+        const [existingData] = await connection.query("SELECT * FROM " + quote(table) + " ORDER BY " + orderBy);
+        if (existingCount !== sourceRows.length ||
+            digestRows(existingData, columns) !== digestRows(sourceRows, columns)) {
+          throw new Error(
+            "Doeltabel " + table + " bevat al gegevens die afwijken van SQLite. " +
+            "Er is niets overschreven; herstel de MySQL-doeldatabase of gebruik een lege database."
+          );
+        }
+        report.push({ table, rows: sourceRows.length, status: "bestond al en is geverifieerd" });
+        continue;
+      }
+
+      if (sourceRows.length) {
+        const insertSql = "INSERT INTO " + quote(table) + " (" +
+          columns.map(column => quote(column.name)).join(",") + ") VALUES (" +
+          columns.map(() => "?").join(",") + ")";
+        await connection.query("SET FOREIGN_KEY_CHECKS=0");
+        try {
+          await connection.beginTransaction();
+          for (let offset = 0; offset < sourceRows.length; offset += 100) {
+            const batch = sourceRows.slice(offset, offset + 100);
+            for (const row of batch) {
+              await connection.execute(insertSql, columns.map(column => row[column.name]));
+            }
+          }
+          await connection.commit();
+        } catch (error) {
+          await connection.rollback();
+          throw error;
+        } finally {
+          await connection.query("SET FOREIGN_KEY_CHECKS=1");
+        }
+      }
+
+      for (const index of indexes) {
+        if (index.origin === "pk") continue;
+        // MySQL has no partial indexes. For this schema's partial unique index
+        // on wc_customer_id, a normal UNIQUE index is equivalent because NULLs
+        // are allowed more than once in MySQL.
+        const indexColumns = sqlite.prepare("PRAGMA index_info(" + quote(index.name) + ")").all();
+        if (!indexColumns.length) continue;
+        const indexName = "mig_" + table + "_" + index.name;
+        const indexSql = "CREATE " + (index.unique ? "UNIQUE " : "") + "INDEX " +
+          quote(indexName) + " ON " + quote(table) + " (" +
+          indexColumns.map(column => quote(column.name)).join(",") + ")";
+        try {
+          await connection.query(indexSql);
+        } catch (error) {
+          if (error.code !== "ER_DUP_KEYNAME" && error.code !== "ER_DUP_ENTRY") throw error;
+        }
+      }
+
       const [verified] = await connection.query("SELECT COUNT(*) AS total FROM " + quote(table));
       const targetCount = Number(verified[0].total);
       if (targetCount !== sourceRows.length) {
