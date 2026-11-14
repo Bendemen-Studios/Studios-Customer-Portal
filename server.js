@@ -30,6 +30,7 @@ const db = require("./src/db");
 const { requireAuth, requireAdmin } = require("./src/auth");
 const woo = require("./src/woocommerce");
 const { sendAutomatedOrderEmail } = require("./src/order-mail");
+const { addBillingPeriod } = require("./src/billing-period");
 
 const app = express();
 const PORT = Number(process.env.SERVER_PORT || process.env.PORT || 3000);
@@ -501,13 +502,6 @@ app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>res.redirect("/admin"
 
 app.get("/health",async(_req,res)=>{const redisStatus=await redis.healthCheck();res.json({ok:true,redis:redisStatus});});
 app.use((err,req,res,next)=>{console.error(err);res.status(500).send("Er is iets misgegaan.");});
-function addBillingPeriod(dateString,interval){
- const date=new Date(dateString+"T12:00:00.000Z");
- if(interval==="week")date.setUTCDate(date.getUTCDate()+7);
- else if(interval==="year")date.setUTCFullYear(date.getUTCFullYear()+1);
- else {const day=date.getUTCDate();date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()+1);const last=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,0)).getUTCDate();date.setUTCDate(Math.min(day,last));}
- return date.toISOString().slice(0,10);
-}
 async function processRecurringOrders(){
  const today=new Date().toISOString().slice(0,10);
  const due=db.prepare("SELECT * FROM recurring_orders WHERE status='active' AND next_payment IS NOT NULL AND next_payment<=? AND (last_generated_for IS NULL OR last_generated_for<next_payment) ORDER BY id").all(today);
