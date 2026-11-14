@@ -31,14 +31,24 @@ if (driver === "mysql") {
     connectTimeout: 10000,
     enableKeepAlive: true
   });
-  mysqlReady = mysqlPool.query(
-    "CREATE TABLE IF NOT EXISTS sessions (" +
-    "sid VARCHAR(255) NOT NULL PRIMARY KEY," +
-    "data LONGTEXT NOT NULL," +
-    "expires_at BIGINT NOT NULL," +
-    "KEY idx_sessions_expiry (expires_at)" +
-    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
-  );
+  mysqlReady = null;
+}
+
+async function ensureMysqlReady() {
+  if (!mysqlReady) {
+    mysqlReady = mysqlPool.query(
+      "CREATE TABLE IF NOT EXISTS sessions (" +
+      "sid VARCHAR(255) NOT NULL PRIMARY KEY," +
+      "data LONGTEXT NOT NULL," +
+      "expires_at BIGINT NOT NULL," +
+      "KEY idx_sessions_expiry (expires_at)" +
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    ).then(() => true).catch(error => {
+      mysqlReady = null;
+      throw error;
+    });
+  }
+  await ensureMysqlReady();
 }
 
 class PersistentSessionStore extends session.Store {
@@ -56,7 +66,7 @@ class PersistentSessionStore extends session.Store {
 
   async _persistentGet(sid) {
     if (driver === "mysql") {
-      await mysqlReady;
+      await ensureMysqlReady();
       const [rows] = await mysqlPool.execute(
         "SELECT data FROM sessions WHERE sid=? AND expires_at>?",
         [sid, Date.now()]
@@ -69,7 +79,7 @@ class PersistentSessionStore extends session.Store {
 
   async _persistentSet(sid, sess, expiresAt) {
     if (driver === "mysql") {
-      await mysqlReady;
+      await ensureMysqlReady();
       await mysqlPool.execute(
         "INSERT INTO sessions(sid,data,expires_at) VALUES(?,?,?) " +
         "ON DUPLICATE KEY UPDATE data=VALUES(data),expires_at=VALUES(expires_at)",
@@ -85,7 +95,7 @@ class PersistentSessionStore extends session.Store {
 
   async _persistentDelete(sid) {
     if (driver === "mysql") {
-      await mysqlReady;
+      await ensureMysqlReady();
       await mysqlPool.execute("DELETE FROM sessions WHERE sid=?", [sid]);
       return;
     }
@@ -94,7 +104,7 @@ class PersistentSessionStore extends session.Store {
 
   async _persistentTouch(sid, expiresAt) {
     if (driver === "mysql") {
-      await mysqlReady;
+      await ensureMysqlReady();
       await mysqlPool.execute("UPDATE sessions SET expires_at=? WHERE sid=?", [expiresAt, sid]);
       return;
     }
