@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS mail_logs (
  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
  recipient TEXT NOT NULL,
  subject TEXT NOT NULL,
- status TEXT NOT NULL DEFAULT 'sending' CHECK(status IN ('sending','sent','failed')),
+ status TEXT NOT NULL DEFAULT 'sending' CHECK(status IN ('sending','sent','failed','skipped')),
  error TEXT,
  message_id TEXT,
  is_test INTEGER NOT NULL DEFAULT 0,
