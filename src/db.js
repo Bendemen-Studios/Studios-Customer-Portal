@@ -137,6 +137,24 @@ CREATE TABLE IF NOT EXISTS recurring_order_reminders (
 );
 CREATE INDEX IF NOT EXISTS idx_recurring_reminders_due
  ON recurring_order_reminders(status, scheduled_for);
+CREATE TABLE IF NOT EXISTS mail_logs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ email_type TEXT NOT NULL CHECK(email_type IN ('new_order','reminder_7','reminder_3')),
+ order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+ recipient TEXT NOT NULL,
+ subject TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'sending' CHECK(status IN ('sending','sent','failed','skipped')),
+ error TEXT,
+ message_id TEXT,
+ is_test INTEGER NOT NULL DEFAULT 0,
+ days_before INTEGER,
+ order_date TEXT,
+ parent_log_id INTEGER REFERENCES mail_logs(id) ON DELETE SET NULL,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mail_logs_created ON mail_logs(created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_mail_logs_status ON mail_logs(status);
 `);
 
 function addColumn(table, column, definition) {
