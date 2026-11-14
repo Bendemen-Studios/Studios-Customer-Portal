@@ -41,6 +41,20 @@ function safeDefault(value, column) {
   return "";
 }
 
+async function ensureIndexes(connection, table, indexes, sqlite) {
+  const [existingRows] = await connection.query("SHOW INDEX FROM " + quote(table));
+  const existingNames = new Set(existingRows.map(row => String(row.Key_name)));
+  for (const index of indexes) {
+    if (index.origin === "pk") continue;
+    const indexColumns = sqlite.prepare("PRAGMA index_info(" + quote(index.name) + ")").all();
+    if (!indexColumns.length) continue;
+    const indexName = "mig_" + table + "_" + index.name;
+    if (existingNames.has(indexName)) continue;
+    const indexSql = "CREATE " + (index.unique ? "UNIQUE " : "") + "INDEX " + quote(indexName) + " ON " + quote(table) + " (" + indexColumns.map(column => quote(column.name)).join(",") + ")";
+    try { await connection.query(indexSql); existingNames.add(indexName); }
+    catch (error) { if (error.code !== "ER_DUP_KEYNAME" && error.code !== "ER_DUP_ENTRY") throw error; }
+  }
+}
 function digestRows(rows, columns) {
   // SQLite en MySQL kunnen rijen in een andere volgorde teruggeven.
   // Sorteer daarom de genormaliseerde rijen vóór de checksum.
@@ -126,6 +140,17 @@ async function main() {
         "CREATE TABLE IF NOT EXISTS " + quote(table) + " (" + definitions.join(",") +
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
       );
+
+      // Stop veilig bij een afwijkend schema; wijzig bestaande tabellen niet automatisch.
+      const [targetColumns] = await connection.query("SHOW COLUMNS FROM " + quote(table));
+      const targetColumnNames = new Set(targetColumns.map(column => String(column.Field)));
+      const missingColumns = columns.map(column => column.name).filter(name => !targetColumnNames.has(name));
+      if (missingColumns.length) {
+        throw new Error("MySQL-tabel mist kolommen (" + missingColumns.join(", ") + "). Herstel het schema of gebruik een lege migratiedatabase.");
+      }
+
+      // Ook indexen herstellen als een eerdere migratie na data-import stopte.
+      await ensureIndexes(connection, table, indexes, sqlite);
 
       const sourceRows = sqlite.prepare("SELECT * FROM " + quote(table)).all();
       const [targetRows] = await connection.query("SELECT COUNT(*) AS total FROM " + quote(table));
