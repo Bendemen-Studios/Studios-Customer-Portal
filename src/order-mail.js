@@ -76,7 +76,7 @@ async function sendAutomatedOrderEmail({ to, order, isTest = false }) {
   const url = orderUrl(order, isTest);
   const pdf = await makePdf(order);
   return transporter().sendMail({
-    from: sender(),
+    from: sender(`${daysBefore} Dagen nog om te betalen | Bendemen Supply Panel BETA`),
     to,
     subject: `Bendemen Studios – bestelling #${order.number || order.id}${isTest ? " (test)" : ""}`,
     text: `Je bestelling staat klaar. Bekijk de bestelling in het Bendemen Supply Panel: ${url}`,
