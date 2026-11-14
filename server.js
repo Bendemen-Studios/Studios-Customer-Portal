@@ -371,7 +371,7 @@ app.get("/admin",requireAuth,requireAdmin,(req,res)=>{
 app.get("/admin/mail",requireAuth,requireAdmin,(req,res)=>{
  const logs=db.prepare("SELECT * FROM mail_logs ORDER BY id DESC LIMIT 250").all();
  const rows=logs.map(log=>{
-  const status=log.status==="sent"?"Verzonden":log.status==="failed"?"Mislukt":"Bezig";
+  const status=log.status==="sent"?"Verzonden":log.status==="failed"?"Mislukt":log.status==="skipped"?"Overgeslagen":"Bezig";
   const orderLabel=log.order_id?"SUPPLY-"+(db.prepare("SELECT COALESCE(local_order_no,id) n FROM orders WHERE id=?").get(log.order_id)?.n||log.order_id):(log.is_test?"Testmail":"—");
   return '<tr><td>'+esc(log.created_at)+'</td><td>'+esc(mailTypeLabel(log.email_type))+(log.is_test?' <span class="mail-tag">TEST</span>':'')+'</td><td>'+esc(log.recipient)+'</td><td>'+esc(orderLabel)+'</td><td><span class="mail-status mail-'+esc(log.status)+'">'+esc(status)+'</span></td><td>'+esc(log.sent_at||'—')+'</td><td>'+(log.error?'<span class="mail-error" title="'+esc(log.error)+'">'+esc(log.error)+'</span>':'—')+'</td><td><form method="post" action="/admin/mail/'+log.id+'/resend" onsubmit="return confirm(\'Deze e-mail opnieuw versturen naar '+esc(log.recipient)+'?\')"><button class="secondary">Opnieuw versturen</button></form></td></tr>';
  }).join("");
@@ -385,6 +385,7 @@ app.post("/admin/mail/test",requireAuth,requireAdmin,async(req,res)=>{
  const type=String(req.body.email_type||"");
  const to=String(req.body.to||"").trim();
  if(!MAIL_TYPES.has(type))return res.status(400).send("Ongeldig e-mailtype.");
+ if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(to))return res.status(400).send("Vul een geldig e-mailadres in.");
  const result=await sendLoggedMail({type,to,isTest:true});
  res.redirect("/admin/mail?"+(result.success?"sent=1":"failed=1"));
 });
@@ -689,6 +690,9 @@ async function processRecurringOrders(){
     const terminalStatuses=new Set(["refunded","cancelled","canceled"]);
     if(paidStatuses.has(currentStatus)||paidStatuses.has(localStatus)||paymentDate||
        terminalStatuses.has(currentStatus)||terminalStatuses.has(localStatus)){
+     const skippedType=reminder.days_before===7?"reminder_7":"reminder_3";
+     db.prepare("INSERT INTO mail_logs (email_type,order_id,recipient,subject,status,error,days_before,order_date) VALUES (?,?,?,?, 'skipped',?,?,?)")
+      .run(skippedType,reminder.order_id,reminder.email,mailSubject(skippedType,{number:reminder.wc_order_number||reminder.wc_order_id||reminder.order_id}),"Herinnering overgeslagen: bestelling is betaald of afgesloten.",reminder.days_before,reminder.scheduled_for);
      db.prepare("UPDATE recurring_order_reminders SET status='skipped',claimed_at=NULL,last_error=? WHERE id=?")
       .run("Herinnering overgeslagen: bestelling is betaald of afgesloten.",reminder.id);
      console.log("Bestelherinnering overgeslagen voor order "+reminder.order_id+" (betaald/afgesloten).");
