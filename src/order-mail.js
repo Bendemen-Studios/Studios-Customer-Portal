@@ -24,8 +24,30 @@ function transporter() {
   });
 }
 
-function sender(displayName) {
-  return { name: displayName, address: FROM_ADDRESS };
+function makePdf(order) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 48 });
+    const chunks = [];
+    doc.on("data", chunk => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    doc.fontSize(20).text("Bendemen Studios");
+    doc.moveDown().fontSize(14).text("Pro-forma betalingsverzoek");
+    doc.moveDown().fontSize(10).text(`Bestelling #${order.number || order.id}`);
+    for (const item of order.line_items || []) {
+      doc.text(`${item.name} × ${item.quantity}`);
+    }
+    doc.moveDown().fontSize(12).text(`Totaal: ${order.total || ""} ${order.currency || ""}`);
+    doc.moveDown().fontSize(9).text("Dit document is een pro-forma betalingsverzoek en geen definitieve btw-factuur.");
+    doc.end();
+  });
+}
+
+function orderUrl(order, isTest) {
+  const base = process.env.PANEL_PUBLIC_URL.replace(/\/$/, "");
+  return isTest
+    ? base + "/orders"
+    : base + "/orders/" + encodeURIComponent(order.id);
 }
 
 function emailLayout(content) {
@@ -44,39 +66,17 @@ function emailLayout(content) {
 </html>`;
 }
 
-function makePdf(order) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 48 });
-    const chunks = [];
-    doc.on("data", chunk => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-    doc.fontSize(20).text("Bendemen Studios");
-    doc.moveDown().fontSize(14).text("Pro-forma betalingsverzoek");
-    doc.moveDown().fontSize(10).text(`Bestelling #${order.number || order.id}`);
-    for (const item of order.line_items || []) doc.text(`${item.name} × ${item.quantity}`);
-    doc.moveDown().fontSize(12).text(`Totaal: ${order.total || ""} ${order.currency || ""}`);
-    doc.moveDown().fontSize(9).text("Dit document is een pro-forma betalingsverzoek en geen definitieve btw-factuur.");
-    doc.end();
-  });
+function sender(displayName) {
+  return { name: displayName, address: FROM_ADDRESS };
 }
 
-function orderUrl(order) {
-  const base = process.env.PANEL_PUBLIC_URL.replace(/\/$/, "");
-  return base + "/orders/" + encodeURIComponent(order.id);
-}
-
-async function sendAutomatedOrderEmail({ to, order }) {
-  if (!configured()) {
-    console.warn("Bestelmail niet verzonden: SMTP configuratie ontbreekt.");
-    return false;
-  }
-  const url = orderUrl(order);
+async function sendAutomatedOrderEmail({ to, order, isTest = false }) {
+  const url = orderUrl(order, isTest);
   const pdf = await makePdf(order);
-  await transporter().sendMail({
+  return transporter().sendMail({
     from: sender("Factuur aangemaakt | Bendemen Supply Panel BETA"),
     to,
-    subject: `Bendemen Studios – bestelling #${order.number || order.id}`,
+    subject: `Bendemen Studios – bestelling #${order.number || order.id}${isTest ? " (test)" : ""}`,
     text: `Je bestelling staat klaar. Bekijk de bestelling in het Bendemen Supply Panel: ${url}`,
     html: emailLayout(`<p>Je bestelling staat klaar.</p><p><a href="${url}" style="display:inline-block;padding:12px 18px;background:#20242a;color:#ffffff;text-decoration:none;border-radius:4px;">Bekijk bestelling en betaal veilig</a></p>`),
     attachments: [{
@@ -84,15 +84,10 @@ async function sendAutomatedOrderEmail({ to, order }) {
       content: pdf
     }]
   });
-  return true;
 }
 
-async function sendScheduledOrderReminder({ to, order, daysBefore, orderDate }) {
-  if (!configured()) {
-    console.warn("Bestelherinnering niet verzonden: SMTP configuratie ontbreekt.");
-    return false;
-  }
-  const url = orderUrl(order);
+async function sendScheduledOrderReminder({ to, order, daysBefore, orderDate, isTest = false }) {
+  const url = orderUrl(order, isTest);
   const date = new Intl.DateTimeFormat("nl-NL", {
     dateStyle: "long",
     timeZone: process.env.BUSINESS_TIME_ZONE || "Europe/Amsterdam"
@@ -101,14 +96,17 @@ async function sendScheduledOrderReminder({ to, order, daysBefore, orderDate }) 
     ? "Herinnering: je bestelling staat over 7 dagen gepland"
     : "Laatste herinnering: je bestelling staat over 3 dagen gepland";
   const text = `Je geplande bestelling staat gepland op ${date}. Bekijk de bestelling in het Bendemen Supply Panel: ${url}`;
-  await transporter().sendMail({
+  return transporter().sendMail({
     from: sender(`${daysBefore} Dagen nog om te betalen | Bendemen Supply Panel BETA`),
     to,
-    subject,
+    subject: subject + (isTest ? " (test)" : ""),
     text,
     html: emailLayout(`<p>Dit is een herinnering voor je geplande bestelling.</p><p>De bestelling staat gepland op <strong>${date}</strong> (over ${daysBefore} dagen).</p><p><a href="${url}" style="display:inline-block;padding:12px 18px;background:#20242a;color:#ffffff;text-decoration:none;border-radius:4px;">Bekijk je bestelling in het Bendemen Supply Panel</a></p><p>Heb je vragen? Neem dan contact met ons op.</p>`)
   });
-  return true;
 }
 
-module.exports = { sendAutomatedOrderEmail, sendScheduledOrderReminder, configured };
+module.exports = {
+  sendAutomatedOrderEmail,
+  sendScheduledOrderReminder,
+  configured
+};
