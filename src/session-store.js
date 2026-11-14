@@ -48,7 +48,7 @@ async function ensureMysqlReady() {
       throw error;
     });
   }
-  await ensureMysqlReady();
+  await mysqlReady;
 }
 
 class PersistentSessionStore extends session.Store {
