@@ -122,6 +122,20 @@ CREATE TABLE IF NOT EXISTS cancellations (
  status TEXT NOT NULL DEFAULT 'pending',
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS recurring_order_reminders (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ recurring_order_id INTEGER NOT NULL REFERENCES recurring_orders(id) ON DELETE CASCADE,
+ order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+ scheduled_for TEXT NOT NULL,
+ days_before INTEGER NOT NULL CHECK(days_before IN (7,3)),
+ status TEXT NOT NULL DEFAULT 'pending',
+ sent_at TEXT,
+ last_error TEXT,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(recurring_order_id, scheduled_for, days_before)
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_reminders_due
+ ON recurring_order_reminders(status, scheduled_for);
 `);
 
 function addColumn(table, column, definition) {
