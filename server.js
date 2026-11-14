@@ -29,7 +29,9 @@ const bcrypt = require("bcryptjs");
 const db = require("./src/db");
 const { requireAuth, requireAdmin } = require("./src/auth");
 const woo = require("./src/woocommerce");
-const { sendAutomatedOrderEmail } = require("./src/order-mail");
+const { sendAutomatedOrderEmail, sendScheduledOrderReminder } = require("./src/order-mail");
+const { addBillingPeriod } = require("./src/billing-period");
+const { shiftDate, reminderSchedule } = require("./src/order-reminders");
 
 const app = express();
 const PORT = Number(process.env.SERVER_PORT || process.env.PORT || 3000);
@@ -501,32 +503,95 @@ app.get("/admin/costs",requireAuth,requireAdmin,(req,res)=>res.redirect("/admin"
 
 app.get("/health",async(_req,res)=>{const redisStatus=await redis.healthCheck();res.json({ok:true,redis:redisStatus});});
 app.use((err,req,res,next)=>{console.error(err);res.status(500).send("Er is iets misgegaan.");});
-function addBillingPeriod(dateString,interval){
- const date=new Date(dateString+"T12:00:00.000Z");
- if(interval==="week")date.setUTCDate(date.getUTCDate()+7);
- else if(interval==="year")date.setUTCFullYear(date.getUTCFullYear()+1);
- else {const day=date.getUTCDate();date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()+1);const last=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,0)).getUTCDate();date.setUTCDate(Math.min(day,last));}
- return date.toISOString().slice(0,10);
+function businessDate(){
+ const parts=new Intl.DateTimeFormat("en-GB",{timeZone:process.env.BUSINESS_TIME_ZONE||"Europe/Amsterdam",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+ const value={};for(const part of parts)if(part.type!=="literal")value[part.type]=part.value;
+ return value.year+"-"+value.month+"-"+value.day;
 }
+
+let recurringSchedulerRunning=false;
 async function processRecurringOrders(){
- const today=new Date().toISOString().slice(0,10);
- const due=db.prepare("SELECT * FROM recurring_orders WHERE status='active' AND next_payment IS NOT NULL AND next_payment<=? AND (last_generated_for IS NULL OR last_generated_for<next_payment) ORDER BY id").all(today);
- for(const sub of due){
-  const items=db.prepare("SELECT * FROM recurring_order_items WHERE recurring_order_id=?").all(sub.id);
-  if(!items.length){console.warn("Terugkerende bestelling "+sub.id+" overgeslagen: geen orderregels.");continue;}
-  try{
-   const tx=db.transaction(()=>{
-    const current=db.prepare("SELECT * FROM recurring_orders WHERE id=? AND status='active' AND next_payment=? AND (last_generated_for IS NULL OR last_generated_for<next_payment)").get(sub.id,sub.next_payment);
-    if(!current)return null;
-    const lines=items.map(x=>({product_id:x.product_id,product_name:x.product_name,quantity:x.quantity,unit_price_cents:x.unit_price_cents}));
-    const id=createOrder(current.user_id,lines,null,"Automatisch terugkerende bestelling: "+current.name,current.id);
-    db.prepare("UPDATE recurring_orders SET last_generated_for=?,next_payment=? WHERE id=?").run(current.next_payment,addBillingPeriod(current.next_payment,current.interval),current.id);
-    return id;
-   });
-   const orderId=tx();
-   if(orderId){await syncWooOrder(orderId);await sendOrderWebhook(orderId);console.log("Terugkerende bestelling aangemaakt:",orderId);}
-  }catch(err){console.error("Terugkerende bestelling mislukt voor "+sub.id+":",err.message);}
- }
+ if(recurringSchedulerRunning)return;
+ recurringSchedulerRunning=true;
+ const today=businessDate();
+ const createThrough=shiftDate(today,14);
+ try{
+  // Maak iedere geplande order 14 dagen vóór de besteldatum aan.
+  const due=db.prepare("SELECT * FROM recurring_orders WHERE status='active' AND next_payment IS NOT NULL AND next_payment<=? AND (last_generated_for IS NULL OR last_generated_for<next_payment) ORDER BY id").all(createThrough);
+  for(const sub of due){
+   const items=db.prepare("SELECT * FROM recurring_order_items WHERE recurring_order_id=?").all(sub.id);
+   if(!items.length){console.warn("Terugkerende bestelling "+sub.id+" overgeslagen: geen orderregels.");continue;}
+   try{
+    const tx=db.transaction(()=>{
+     const current=db.prepare("SELECT * FROM recurring_orders WHERE id=? AND status='active' AND next_payment=? AND (last_generated_for IS NULL OR last_generated_for<next_payment)").get(sub.id,sub.next_payment);
+     if(!current)return null;
+     const scheduledDate=current.next_payment;
+     const lines=items.map(x=>({product_id:x.product_id,product_name:x.product_name,quantity:x.quantity,unit_price_cents:x.unit_price_cents}));
+     const orderId=createOrder(current.user_id,lines,null,"Automatisch terugkerende bestelling: "+current.name+" (gepland voor "+scheduledDate+")",current.id);
+     const insertReminder=db.prepare("INSERT OR IGNORE INTO recurring_order_reminders (recurring_order_id,order_id,scheduled_for,days_before,status) VALUES (?,?,?,?, 'pending')");
+     for(const reminder of reminderSchedule(scheduledDate)){
+      insertReminder.run(current.id,orderId,reminder.sendOn,reminder.daysBefore);
+     }
+     db.prepare("UPDATE recurring_orders SET last_generated_for=?,next_payment=? WHERE id=?").run(scheduledDate,addBillingPeriod(scheduledDate,current.interval),current.id);
+     return {orderId,scheduledDate};
+    });
+    const created=tx();
+    if(created){
+     await syncWooOrder(created.orderId);
+     await sendOrderWebhook(created.orderId);
+     console.log("Terugkerende bestelling "+created.orderId+" aangemaakt voor "+created.scheduledDate+" (14 dagen vooraf).");
+    }
+   }catch(err){console.error("Terugkerende bestelling mislukt voor "+sub.id+":",err.message);}
+  }
+
+  // Herstel vastgelopen claims na een onverwachte processtop.
+  db.prepare("UPDATE recurring_order_reminders SET status='pending',claimed_at=NULL WHERE status='sending' AND claimed_at<?").run(Date.now()-10*60*1000);
+  const reminders=db.prepare(
+   "SELECT r.id,r.order_id,r.scheduled_for,r.days_before,o.user_id,o.status AS order_status,o.total_cents,o.currency,o.wc_order_number,o.wc_order_id,u.email " +
+   "FROM recurring_order_reminders r JOIN orders o ON o.id=r.order_id JOIN users u ON u.id=o.user_id " +
+   "WHERE r.status='pending' AND r.scheduled_for<=? ORDER BY r.scheduled_for,r.id"
+  ).all(today);
+  for(const reminder of reminders){
+   const claimed=db.prepare("UPDATE recurring_order_reminders SET status='sending',claimed_at=?,last_error=NULL WHERE id=? AND status='pending'").run(Date.now(),reminder.id);
+   if(!claimed.changes)continue;
+   try{
+    // Controleer de actuele WooCommerce-status vlak vóór verzending; de lokale kopie kan achterlopen.
+    let currentStatus="";
+    let paymentDate="";
+    if(reminder.wc_order_id){
+     const liveOrder=await woo.getOrder(reminder.wc_order_id);
+     currentStatus=String(liveOrder.status||"").toLowerCase();
+     paymentDate=String(liveOrder.date_paid||"");
+     db.prepare("UPDATE orders SET wc_status=? WHERE id=?").run(currentStatus,reminder.order_id);
+    }
+    const localStatus=String(reminder.order_status||"").toLowerCase();
+    const paidStatuses=new Set(["processing","completed","paid","betaald"]);
+    const terminalStatuses=new Set(["refunded","cancelled","canceled"]);
+    if(paidStatuses.has(currentStatus)||paidStatuses.has(localStatus)||paymentDate||
+       terminalStatuses.has(currentStatus)||terminalStatuses.has(localStatus)){
+     db.prepare("UPDATE recurring_order_reminders SET status='skipped',claimed_at=NULL,last_error=? WHERE id=?")
+      .run("Herinnering overgeslagen: bestelling is betaald of afgesloten.",reminder.id);
+     console.log("Bestelherinnering overgeslagen voor order "+reminder.order_id+" (betaald/afgesloten).");
+     continue;
+    }
+    const sent=await sendScheduledOrderReminder({
+     to:reminder.email,
+     order:{id:reminder.order_id,number:reminder.wc_order_number||reminder.wc_order_id||reminder.order_id},
+     daysBefore:reminder.days_before,
+     orderDate:reminder.scheduled_for
+    });
+    if(sent){
+     db.prepare("UPDATE recurring_order_reminders SET status='sent',sent_at=CURRENT_TIMESTAMP,claimed_at=NULL,last_error=NULL WHERE id=?").run(reminder.id);
+     console.log("Bestelherinnering ("+reminder.days_before+" dagen) verzonden voor order "+reminder.order_id+".");
+    }else{
+     db.prepare("UPDATE recurring_order_reminders SET status='pending',claimed_at=NULL,last_error=? WHERE id=?").run("SMTP is niet geconfigureerd.",reminder.id);
+    }
+   }catch(err){
+    db.prepare("UPDATE recurring_order_reminders SET status='pending',claimed_at=NULL,last_error=? WHERE id=?").run(String(err.message||err).slice(0,1000),reminder.id);
+    console.error("Bestelherinnering mislukt voor order "+reminder.order_id+":",err.message);
+   }
+  }
+ }finally{recurringSchedulerRunning=false;}
 }
 setTimeout(()=>processRecurringOrders().catch(err=>console.error("Recurring scheduler:",err.message)),5000);
 setInterval(()=>processRecurringOrders().catch(err=>console.error("Recurring scheduler:",err.message)),60000).unref();
